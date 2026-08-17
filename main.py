@@ -32,6 +32,77 @@ def _tools_already_injected() -> bool:
     return any(isinstance(m, dict) and m.get("tools") for m in messages)
 
 
+def stream_and_assemble(completion) -> list[dict]:
+    """遍历流式 chunk：content 边收边打印，tool_calls 碎片逐步拼装。
+
+    返回组装完成的 assistant 消息列表（普通 dict，已做定稿处理）。
+    """
+    stream_messages_dict = {}
+
+    for chunk in completion:
+        for choice in chunk.choices:
+            index = choice.index
+            message = stream_messages_dict.setdefault(index, {})
+            delta = choice.delta
+
+            if delta.role:
+                message["role"] = delta.role
+
+            content = delta.content
+            if content:  # 大部分 chunk 的 content 是 None，必须守卫
+                print(content, end="", flush=True)
+                message["content"] = message.get("content", "") + content
+
+            if delta.tool_calls:
+                tool_calls = message.setdefault("tool_calls", [])
+                for tool_call in delta.tool_calls:
+                    tool_call_index = tool_call.index
+                    # 惰性扩容：缺几个补几个，保证下标可访问
+                    if len(tool_calls) < tool_call_index + 1:
+                        tool_calls.extend([{}] * (tool_call_index + 1 - len(tool_calls)))
+                    tool_call_object = tool_calls[tool_call_index]
+                    tool_call_object["index"] = tool_call_index
+
+                    # 一次性字段：直接赋值
+                    if tool_call.id:
+                        tool_call_object["id"] = tool_call.id
+                    if tool_call.type:
+                        tool_call_object["type"] = tool_call.type
+
+                    if tool_call.function:
+                        function = tool_call_object.setdefault("function", {})
+                        if tool_call.function.name:
+                            function["name"] = tool_call.function.name
+                        # 分片字段：拼接累加
+                        if tool_call.function.arguments:
+                            function["arguments"] = function.get("arguments", "") + tool_call.function.arguments
+
+    # 定稿：补 role、摘掉组装辅助字段 index
+    for message in stream_messages_dict.values():
+        message.setdefault("role", "assistant")
+        for tc in message.get("tool_calls", []):
+            tc.pop("index", None)
+
+    return list(stream_messages_dict.values())
+
+
+def execute_tool_call(tool_call: dict) -> tuple[str, str]:
+    """执行单个工具调用，返回 (工具名, 结果文本)。任何失败都转为文本结果，不向上抛。"""
+    name = tool_call["function"].get("name")
+    raw_arguments = tool_call["function"].get("arguments") or "{}"
+    # 灰色打印调用过程，让用户看见 agent 在干什么
+    print(f"\n\033[90m[调用工具] {name}({raw_arguments})\033[0m", flush=True)
+    try:
+        if name not in tools_dict:
+            raise KeyError(f"Unknown tool: {name}")
+        arguments = json.loads(raw_arguments)
+        result = tools_dict[name](**arguments)
+    except Exception as e:
+        result = f"调用失败: {type(e).__name__}: {e}"
+    preview = result if len(result) <= 100 else result[:100] + "..."
+    print(f"\033[90m[工具结果] {preview}\033[0m", flush=True)
+    return name, result
+
 
 def chat(user_input: str):
     messages.append({"role": "user", "content": user_input})
@@ -42,61 +113,8 @@ def chat(user_input: str):
             tools=tools,
             stream=True,
         )
-        stream_messages_dict = {}
 
-        for chunk in completion:
-            for choice in chunk.choices:
-                index = choice.index
-                message = stream_messages_dict.setdefault(index, {})
-                delta = choice.delta
-                role = delta.role
-                if role:
-                    message["role"] = role
-                content = delta.content
-                if content:  # 大部分 chunk 的 content 是 None，必须守卫
-                    print(content, end="", flush=True)
-                    message["content"] = message.get("content", "") + content
-
-                tool_calls = delta.tool_calls
-                if tool_calls:
-                    if "tool_calls" not in message:
-                        message["tool_calls"] = []
-                    for tool_call in tool_calls:
-                        tool_call_index = tool_call.index
-                        if len(message["tool_calls"]) < (tool_call_index + 1):
-                            message["tool_calls"].extend([{}] * (tool_call_index + 1 - len(message["tool_calls"])))
-                        tool_call_object = message["tool_calls"][tool_call_index]
-                        tool_call_object["index"] = tool_call_index
-
-                        tool_call_id = tool_call.id
-                        if tool_call_id:
-                            tool_call_object["id"] = tool_call_id
-                        tool_call_type = tool_call.type
-                        if tool_call_type:
-                            tool_call_object["type"] = tool_call_type
-                        tool_call_function = tool_call.function
-                        if tool_call_function:
-                            if "function" not in tool_call_object:
-                                tool_call_object["function"] = {}
-                            tool_call_function_name = tool_call_function.name
-                            if tool_call_function_name:
-                                tool_call_object["function"]["name"] = tool_call_function_name
-                            tool_call_function_arguments = tool_call_function.arguments
-                            if tool_call_function_arguments:
-                                if "arguments" not in tool_call_object["function"]:
-                                    tool_call_object["function"]["arguments"] = tool_call_function_arguments
-                                else:
-                                    tool_call_object["function"]["arguments"] += tool_call_function_arguments
-
-                        message["tool_calls"][tool_call_index] = tool_call_object
-
-
-        # 组装结果是普通 dict，下游统一用字典方式访问
-        for assistant_message in stream_messages_dict.values():
-            assistant_message.setdefault("role", "assistant")
-            # 删掉组装用的辅助字段，保持消息格式干净
-            for tc in assistant_message.get("tool_calls", []):
-                tc.pop("index", None)
+        for assistant_message in stream_and_assemble(completion):
             messages.append(assistant_message)
 
             tool_calls = assistant_message.get("tool_calls")
@@ -107,19 +125,7 @@ def chat(user_input: str):
                 return
 
             for tool_call in tool_calls:
-                name = tool_call["function"].get("name")
-                # try/except 在循环体内：保证每个 tool_call 必有一条结果回传，
-                # 否则残留的 tool_call 会导致下一轮请求被 API 拒绝（400）
-                try:
-                    if name not in tools_dict:
-                        raise KeyError(f"Unknown tool: {name}")
-                    arguments = json.loads(tool_call["function"].get("arguments") or "{}")
-                    print(f"\n调用工具: {name}，参数: {arguments}", end="", flush=True)
-                    tool_result = tools_dict[name](**arguments)
-                    print(f"\n工具调用结果: {tool_result}\n", end="", flush=True)
-
-                except Exception as e:
-                    tool_result = f"调用失败: {type(e).__name__}: {e}"
+                name, tool_result = execute_tool_call(tool_call)
                 messages.append(
                     {
                         "role": "tool",
