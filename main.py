@@ -114,7 +114,10 @@ def chat(user_input: str):
                     if name not in tools_dict:
                         raise KeyError(f"Unknown tool: {name}")
                     arguments = json.loads(tool_call["function"].get("arguments") or "{}")
+                    print(f"\n调用工具: {name}，参数: {arguments}", end="", flush=True)
                     tool_result = tools_dict[name](**arguments)
+                    print(f"\n工具调用结果: {tool_result}\n", end="", flush=True)
+
                 except Exception as e:
                     tool_result = f"调用失败: {type(e).__name__}: {e}"
                 messages.append(
