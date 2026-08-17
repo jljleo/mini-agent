@@ -15,14 +15,19 @@ client = OpenAI(
     base_url="https://api.moonshot.cn/v1",
 )
 
-messages = [
+MODEL = "kimi-k3"
+
+SYSTEM_MESSAGES = [
     {"role": "system",
      "content": "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。"},
     {"role": "system",
      "content": "如果有的问题你没法回答,你可以使用search_tools查看有没有可以帮助你的"},
 ]
 
-tools = [SEARCH_TOOLS_SCHEMA]
+messages = list(SYSTEM_MESSAGES)  # 拷贝一份，避免污染模板
+
+# 顶层请求常驻的工具（其余工具由 search_tools 按需动态挂载）
+BASE_TOOLS = [SEARCH_TOOLS_SCHEMA]
 
 MAX_TOOL_ROUNDS = 10  # agent 循环上限：防模型陷入反复调工具的死循环
 
@@ -96,7 +101,7 @@ def execute_tool_call(tool_call: dict) -> tuple[str, str]:
         if name not in tools_dict:
             raise KeyError(f"Unknown tool: {name}")
         arguments = json.loads(raw_arguments)
-        result = tools_dict[name](**arguments)
+        result = str(tools_dict[name](**arguments))  # 兜底：工具可能返回非字符串
     except Exception as e:
         result = f"调用失败: {type(e).__name__}: {e}"
     preview = result if len(result) <= 100 else result[:100] + "..."
@@ -108,9 +113,9 @@ def chat(user_input: str):
     messages.append({"role": "user", "content": user_input})
     for _ in range(MAX_TOOL_ROUNDS):
         completion = client.chat.completions.create(
-            model="kimi-k3",
+            model=MODEL,
             messages=messages,
-            tools=tools,
+            tools=BASE_TOOLS,
             stream=True,
         )
 
@@ -164,23 +169,28 @@ def read_input(prompt: str = "") -> str:
     return sanitize(text)
 
 
-while True:
-    try:
-        question = read_input("Input your question (exit/quit to quit): ")
-    except (EOFError, KeyboardInterrupt):
-        # Ctrl+D (EOFError) 或 Ctrl+C (KeyboardInterrupt)：安全退出
-        print("\nBye!")
-        break
+def main():
+    while True:
+        try:
+            question = read_input("Input your question (exit/quit to quit): ")
+        except (EOFError, KeyboardInterrupt):
+            # Ctrl+D (EOFError) 或 Ctrl+C (KeyboardInterrupt)：安全退出
+            print("\nBye!")
+            break
 
-    if not question:
-        continue
-    if question.lower() in ("exit", "quit", ":q"):
-        print("Bye!")
-        break
+        if not question:
+            continue
+        if question.lower() in ("exit", "quit", ":q"):
+            print("Bye!")
+            break
 
-    history_mark = len(messages)  # 记录历史位置，失败时整体回滚本轮产生的所有消息
-    try:
-        chat(question)
-    except Exception as e:
-        del messages[history_mark:]
-        print(f"[Error] {type(e).__name__}: {e}")
+        history_mark = len(messages)  # 记录历史位置，失败时整体回滚本轮产生的所有消息
+        try:
+            chat(question)
+        except Exception as e:
+            del messages[history_mark:]
+            print(f"[Error] {type(e).__name__}: {e}")
+
+
+if __name__ == "__main__":
+    main()

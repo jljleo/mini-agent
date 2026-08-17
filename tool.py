@@ -53,7 +53,7 @@ ALL_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Get the weather in a location.",
+            "description": "Get the weather in a location. (Demo tool: returns fake data, not real weather.)",
             "parameters": {
                 "type": "object",
                 "properties": {
