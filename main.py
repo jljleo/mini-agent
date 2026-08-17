@@ -5,6 +5,9 @@ import unicodedata
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from rich.console import Console
 
 from tool import tools_dict, SEARCH_TOOLS_SCHEMA, ALL_TOOL_SCHEMAS
 
@@ -14,6 +17,21 @@ client = OpenAI(
     api_key=os.environ.get("MOONSHOT_API_KEY"),
     base_url="https://api.moonshot.cn/v1",
 )
+
+console = Console()
+
+# prompt_toolkit 会话（惰性创建）：历史记录存项目目录，↑ 键可翻出历史提问（跨会话保留）
+# 惰性原因：模块级创建在非 tty 环境（管道输入）会打印警告
+_prompt_session = None
+
+
+def _get_prompt_session() -> PromptSession:
+    global _prompt_session
+    if _prompt_session is None:
+        _prompt_session = PromptSession(
+            history=FileHistory(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".chat_history"))
+        )
+    return _prompt_session
 
 MODEL = "kimi-k3"
 
@@ -112,12 +130,14 @@ def execute_tool_call(tool_call: dict) -> tuple[str, str]:
 def chat(user_input: str):
     messages.append({"role": "user", "content": user_input})
     for _ in range(MAX_TOOL_ROUNDS):
-        completion = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            tools=BASE_TOOLS,
-            stream=True,
-        )
+        # 等待首字到达的间隙显示 spinner，填掉“静默尴尬期”
+        with console.status("[dim]思考中...[/dim]", spinner="dots"):
+            completion = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=BASE_TOOLS,
+                stream=True,
+            )
 
         for assistant_message in stream_and_assemble(completion):
             messages.append(assistant_message)
@@ -159,6 +179,13 @@ def sanitize(text: str) -> str:
 
 
 def read_input(prompt: str = "") -> str:
+    """读取用户输入：终端下用 prompt_toolkit（历史/行编辑），管道模式退回原始读法。"""
+    if sys.stdin.isatty():
+        # prompt_toolkit 遇到 Ctrl+C/Ctrl+D 会抛 KeyboardInterrupt/EOFError，
+        # 与主循环的捕获逻辑兼容
+        return sanitize(_get_prompt_session().prompt(prompt))
+
+    # 非交互环境（管道/重定向）：prompt_toolkit 不适用，退回字节读取
     print(prompt, end="", flush=True)
     raw = sys.stdin.buffer.readline()
 
