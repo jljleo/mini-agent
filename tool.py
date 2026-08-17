@@ -54,6 +54,8 @@ def edit_file(path: str, old: str, new: str):
         f.write(content)
     return f"Edited {path}: replaced 1 occurrence"
 
+
+
 ALL_TOOL_SCHEMAS = [
     {
         "type": "function",
