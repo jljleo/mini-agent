@@ -118,9 +118,13 @@ class ChatSession:
             for assistant_message in assistant_messages:
                 finish_reason = assistant_message.pop("_finish_reason", None)
                 if finish_reason == "length":
-                    print("\033[93m[警告] 输出被 max_tokens 截断，回答可能不完整\033[0m")
+                    if assistant_message.get("tool_calls"):
+                        # 截断发生在工具调用轮：arguments JSON 不完整，后续 json 解析失败属预期
+                        print("\n\033[93m[警告] 输出被 max_tokens 截断：工具调用参数不完整，若解析失败即为此因\033[0m")
+                    else:
+                        print("\n\033[93m[警告] 输出被 max_tokens 截断，回答可能不完整\033[0m")
                 elif finish_reason == "content_filter":
-                    print("\033[93m[警告] 内容被安全审查拦截\033[0m")
+                    print("\n\033[93m[警告] 内容被安全审查拦截\033[0m")
 
                 self.messages.append(assistant_message)
 
