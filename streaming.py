@@ -29,6 +29,10 @@ def stream_and_assemble(completion) -> tuple[list[dict], CompletionUsage | None]
             index = choice.index
             message = stream_messages_dict.setdefault(index, {})
 
+            finish_reason = getattr(choice, "finish_reason", None)
+            if finish_reason:
+                message["_finish_reason"] = finish_reason
+
             delta = choice.delta
 
             if delta.role:
