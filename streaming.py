@@ -4,28 +4,30 @@
 本模块负责边收边打印（content）+ 逐步拼装（tool_calls），输出定稿消息。
 """
 
+from openai.types import CompletionUsage
 
-def stream_and_assemble(completion) -> list[dict]:
+
+def stream_and_assemble(completion) -> tuple[list[dict], CompletionUsage | None]:
     """遍历流式 chunk：content 边收边打印，tool_calls 碎片逐步拼装。
 
-    返回组装完成的 assistant 消息列表（普通 dict，已做定稿处理）。
+    返回 (组装定稿的 assistant 消息列表, usage 对象或 None)。
+    usage 是请求级元数据（账单），只走返回值通道，不写进消息体——避免随历史回传 API。
     """
     stream_messages_dict = {}
 
+    stream_usage: CompletionUsage | None = None
+
     for chunk in completion:
+
+        # usage 在最后一个 chunk 的顶层（此时 choices 为空列表），不进 choice 循环
+        usage = getattr(chunk, "usage", None)
+        if usage:
+            stream_usage = usage
+
         for choice in chunk.choices:
-
-            # finish_reason = getattr(choice, "finish_reason", None)
-            # if finish_reason:
-            #     choice["finish_reason"] = finish_reason
-
 
             index = choice.index
             message = stream_messages_dict.setdefault(index, {})
-
-            usage = getattr(choice, "usage", None)
-            if usage:
-                message["usage"] = usage
 
             delta = choice.delta
 
@@ -46,7 +48,7 @@ def stream_and_assemble(completion) -> list[dict]:
             if delta.tool_calls:
                 _merge_tool_calls(message, delta.tool_calls)
 
-    return _finalize(stream_messages_dict)
+    return _finalize(stream_messages_dict), stream_usage
 
 
 def _merge_tool_calls(message: dict, delta_tool_calls) -> None:

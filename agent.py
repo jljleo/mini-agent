@@ -45,6 +45,9 @@ class ChatSession:
         self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
+        # token 仪表盘：会话累计消耗
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
 
     # ---- 历史管理 ----
 
@@ -100,15 +103,19 @@ class ChatSession:
                     stream_options={"include_usage": True}
                 )
 
-            for assistant_message in stream_and_assemble(completion):
-                finish_reason = assistant_message.get("finish_reason")
-                if finish_reason:
-                    print(f"\nfinish_reason: {finish_reason}")
-                    break
+            assistant_messages, usage = stream_and_assemble(completion)
 
-                usage = assistant_message.get("usage")
-                if usage:
-                    print(f"\nusage: {usage}")
+            if usage:
+                self.total_prompt_tokens += usage.prompt_tokens
+                self.total_completion_tokens += usage.completion_tokens
+                cached = getattr(usage, "cached_tokens", 0) or 0
+                total = self.total_prompt_tokens + self.total_completion_tokens
+                print(
+                    f"\n\033[90m[tokens] 本轮 prompt={usage.prompt_tokens} completion={usage.completion_tokens}"
+                    f"（缓存命中 {cached}）｜累计 {total}\033[0m"
+                )
+
+            for assistant_message in assistant_messages:
 
                 self.messages.append(assistant_message)
 
