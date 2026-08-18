@@ -7,16 +7,10 @@
 
 import os
 import subprocess
-from datetime import datetime
 
 from config import MAX_OUTPUT_LEN, MAX_TIMEOUT, PROJECT_ROOT
 from input_utils import confirm
 from registry import tool
-
-
-@tool("get_current_datetime", "Get the current datetime.", {})
-def get_current_datetime() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ---------- 文件窄接口工具：路径围栏 + 免确认 ----------
@@ -110,25 +104,10 @@ def edit_file(path: str, old: str, new: str) -> str:
     return f"Edited {path}: replaced 1 occurrence"
 
 
-@tool(
-    "get_weather",
-    "Get the weather in a location. (Demo tool: returns fake data, not real weather.)",
-    {
-        "location": {
-            "type": "string",
-            "description": "The location to get the weather for.",
-        },
-    },
-    ["location"],
-)
-def get_weather(location: str) -> str:
-    return f"The weather in {location} is sunny."
-
-
 # 只读安全命令白名单：命中则免确认直接执行；
 # 其余命令一律需要人工确认（默认怀疑，而非默认信任——白名单外的世界交给用户审查）
 SAFE_PREFIXES = (
-    "ls", "pwd", "cat ", "echo ", "grep", "find", "head", "tail", "wc",
+    "ls", "pwd", "cat ", "echo ", "grep", "find", "head", "tail", "wc", "date",
     "git status", "git log", "git diff", "git show", "git branch",
 )
 

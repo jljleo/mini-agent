@@ -12,6 +12,7 @@ import threading
 import unicodedata
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -89,9 +90,11 @@ def _single_key_confirm(message: str) -> bool:
 
     # 用独立 session（不带历史），避免污染主输入的历史记录
     session: PromptSession = PromptSession(key_bindings=kb)
-    # prompt 返回 event.app.exit 的 result；异常（如 Ctrl+D）一律视为拒绝
+    # prompt 返回 event.app.exit 的 result；异常（如 Ctrl+D）一律视为拒绝。
+    # ANSI() 包装：prompt_toolkit 对纯字符串不解析转义序列（安全设计），
+    # 需显式声明“此文本含 ANSI 颜色码”，否则 \033 会以 ^[ 形式原样显示
     try:
-        return bool(session.prompt(message))
+        return bool(session.prompt(ANSI(message)))
     except (EOFError, KeyboardInterrupt):
         return False
 
