@@ -97,9 +97,19 @@ class ChatSession:
                     messages=self.messages,
                     tools=BASE_TOOLS,
                     stream=True,
+                    stream_options={"include_usage": True}
                 )
 
             for assistant_message in stream_and_assemble(completion):
+                finish_reason = assistant_message.get("finish_reason")
+                if finish_reason:
+                    print(f"\nfinish_reason: {finish_reason}")
+                    break
+
+                usage = assistant_message.get("usage")
+                if usage:
+                    print(f"\nusage: {usage}")
+
                 self.messages.append(assistant_message)
 
                 tool_calls = assistant_message.get("tool_calls")

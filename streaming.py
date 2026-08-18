@@ -14,8 +14,19 @@ def stream_and_assemble(completion) -> list[dict]:
 
     for chunk in completion:
         for choice in chunk.choices:
+
+            # finish_reason = getattr(choice, "finish_reason", None)
+            # if finish_reason:
+            #     choice["finish_reason"] = finish_reason
+
+
             index = choice.index
             message = stream_messages_dict.setdefault(index, {})
+
+            usage = getattr(choice, "usage", None)
+            if usage:
+                message["usage"] = usage
+
             delta = choice.delta
 
             if delta.role:
