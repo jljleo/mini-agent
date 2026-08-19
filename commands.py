@@ -1,3 +1,5 @@
+import json
+
 from agent import ChatSession
 from command_registry import command, COMMANDS
 from config import SYSTEM_MESSAGES
@@ -27,5 +29,7 @@ def cmd_tokens(session: ChatSession):
 
 @command("/tools", "列出当前已注册工具（名字+描述）")
 def cmd_tools(session: ChatSession):
-    for function in TOOLS.items():
-        print(f"{function.tool_schema.name}: {function.tool_schema.description}")
+    tools = [fn.tool_schema for fn in TOOLS.values() if hasattr(fn, "tool_schema")]
+    for tool in tools:
+        # tool_dict = json.loads(tool)
+        print(tool["function"]["name"], tool["function"]["description"])
