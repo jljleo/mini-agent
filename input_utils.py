@@ -12,10 +12,12 @@ import threading
 import unicodedata
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 
+from command_registry import COMMANDS
 from config import HISTORY_FILE
 
 # prompt_toolkit 会话（惰性创建）：历史记录存项目目录，↑ 键可翻出历史提问（跨会话保留）
@@ -23,10 +25,32 @@ from config import HISTORY_FILE
 _prompt_session: PromptSession | None = None
 
 
+class SlashCommandCompleter(Completer):
+    """斜杠命令补全：仅在行首以 / 开头时弹出候选（带命令描述）。
+
+    普通输入不弹补全菜单——避免补全菜单打开时回车被"采纳候选"抢占，
+    导致正常提问发不出去。
+    """
+
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        # /quit 不在 COMMANDS（走主循环退出词表），补全里单独补上
+        candidates = {**COMMANDS, "/quit": None}
+        for name, fn in candidates.items():
+            if name.startswith(text):
+                meta = fn.description if fn is not None else "退出程序"
+                yield Completion(name, start_position=-len(text), display_meta=meta)
+
+
 def _get_prompt_session() -> PromptSession:
     global _prompt_session
     if _prompt_session is None:
-        _prompt_session = PromptSession(history=FileHistory(HISTORY_FILE))
+        _prompt_session = PromptSession(
+            history=FileHistory(HISTORY_FILE),
+            completer=SlashCommandCompleter(),
+        )
     return _prompt_session
 
 

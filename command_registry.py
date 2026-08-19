@@ -5,10 +5,16 @@
 没有导入，COMMANDS 永远是空表。
 """
 
+import sys
+
 COMMANDS: dict = {}
+
 
 def command(name: str, description: str):
     def decorator(func):
+        if name in COMMANDS:
+            # 重名静默覆盖容易藏 bug（如复制粘贴忘改名），显式告警
+            print(f"\033[93m[警告] 斜杠命令重复注册，将被覆盖: {name}\033[0m", file=sys.stderr)
         func.description = description
         COMMANDS[name] = func
         return func

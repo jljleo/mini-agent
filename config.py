@@ -25,6 +25,10 @@ MAX_OUTPUT_LEN = 10_000       # 工具结果 / 命令输出的截断阈值：防
 TOOL_RESULT_PREVIEW_LEN = 100  # 终端里工具结果的预览长度
 MAX_TIMEOUT = 120             # bash 超时上限（秒）：由代码钳制，不信任模型传入的值
 
+# --- 斜杠命令 ---
+# 退出词表（非斜杠命令，主循环直接识别；/quit 也走这里统一退出）
+QUIT_COMMANDS = ("exit", "quit", ":q", "/quit")
+
 # --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历史（跨会话）
