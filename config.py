@@ -20,6 +20,8 @@ API_KEY_ENV = "MOONSHOT_API_KEY"  # 从环境变量读 key，不入库
 # 取 30 给复杂任务留足余量，死循环时烧 30 轮 token 也在可接受范围。
 MAX_TOOL_ROUNDS = 30
 
+MAX_TOOL_RESULT_CONTAIN = 5
+
 # --- 输出/上下文保护 ---
 MAX_OUTPUT_LEN = 10_000       # 工具结果 / 命令输出的截断阈值：防大输出灌爆上下文
 TOOL_RESULT_PREVIEW_LEN = 100  # 终端里工具结果的预览长度
@@ -28,6 +30,14 @@ MAX_TIMEOUT = 120             # bash 超时上限（秒）：由代码钳制，�
 # --- 斜杠命令 ---
 # 退出词表（非斜杠命令，主循环直接识别；/quit 也走这里统一退出）
 QUIT_COMMANDS = ("exit", "quit", ":q", "/quit")
+
+# --- L3 工具结果瘦身（compact.py）---
+TOOL_RESULT_KEEP_RECENT = 5     # 保护窗口：最近 N 条 tool 消息不瘦身（churn 防线，勿设 0）
+TOOL_RESULT_MIN_SLIM_LEN = 500  # 原文短于此长度不瘦身：占位符本身 ~80 字符，太短是负收益
+TOOL_ARG_ECHO_LEN = 60          # 占位符中参数回显的截断长度（防占位符自身膨胀）
+# 触发阈值：历史总字符数低于此值完全不动作（保护 prompt cache）。
+# 粗估 1 token ≈ 2 字符（中英混合语料），80K 字符 ≈ 40K tokens。
+SLIM_TRIGGER_CHARS = 80_000
 
 # --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))

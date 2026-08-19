@@ -24,6 +24,7 @@ from config import (
     SYSTEM_MESSAGES,
     TOOL_RESULT_PREVIEW_LEN,
 )
+from compact import apply_slimming, detect_slim_targets
 from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas
 from streaming import stream_and_assemble
 
@@ -91,12 +92,17 @@ class ChatSession:
         """一轮提问：append → 请求 → 流式 → 工具循环，直到模型给出终稿。"""
         self.messages.append({"role": "user", "content": user_input})
 
+        # L3 瘦身：轮边界检测一次，本轮内目标集固定（新产生的 tool 消息天然不在其中）
+        slim_targets = detect_slim_targets(self.messages)
+        if slim_targets:
+            print(f"\033[90m[compact] 已瘦身 {len(slim_targets)} 条超龄工具结果\033[0m")
+
         for _ in range(MAX_TOOL_ROUNDS):
             # 等待首字到达的间隙显示 spinner，填掉"静默尴尬期"
             with console.status("[dim]思考中...[/dim]", spinner="dots"):
                 completion = self.client.chat.completions.create(
                     model=MODEL,
-                    messages=self.messages,
+                    messages=apply_slimming(self.messages, slim_targets),  # 发送时投影，存储不动
                     tools=BASE_TOOLS,
                     stream=True,
                     stream_options={"include_usage": True}

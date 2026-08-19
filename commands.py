@@ -62,5 +62,5 @@ def cmd_tokens(session: ChatSession):
 
 @command("/tools", "列出当前已注册工具（名字+描述）")
 def cmd_tools(session: ChatSession):
-1    schemas = [fn.tool_schema for fn in TOOLS.values() if hasattr(fn, "tool_schema")]
+    schemas = [fn.tool_schema for fn in TOOLS.values() if hasattr(fn, "tool_schema")]
     _print_rows([(s["function"]["name"], s["function"]["description"]) for s in schemas])
