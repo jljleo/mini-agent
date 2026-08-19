@@ -20,8 +20,6 @@ API_KEY_ENV = "MOONSHOT_API_KEY"  # 从环境变量读 key，不入库
 # 取 30 给复杂任务留足余量，死循环时烧 30 轮 token 也在可接受范围。
 MAX_TOOL_ROUNDS = 30
 
-MAX_TOOL_RESULT_CONTAIN = 5
-
 # --- 输出/上下文保护 ---
 MAX_OUTPUT_LEN = 10_000       # 工具结果 / 命令输出的截断阈值：防大输出灌爆上下文
 TOOL_RESULT_PREVIEW_LEN = 100  # 终端里工具结果的预览长度
@@ -38,6 +36,13 @@ TOOL_ARG_ECHO_LEN = 60          # 占位符中参数回显的截断长度（防�
 # 触发阈值：历史总字符数低于此值完全不动作（保护 prompt cache）。
 # 粗估 1 token ≈ 2 字符（中英混合语料），80K 字符 ≈ 40K tokens。
 SLIM_TRIGGER_CHARS = 80_000
+
+# --- L1 历史截断（compact.py，兜底防爆）---
+# 触发用估算 token（chars//2）：达到高水位才截，一刀切到低水位。
+# 双水位滞后：防“刚好切到阈值下、下轮又超”导致每轮都截、每轮缓存全失效。
+# （按 token 而非消息条数：条数与上下文占用无量纲关系，一条大文件结果可顶几十条闲聊）
+TRUNCATE_HIGH_TOKENS = 100_000  # 硬触发线（kimi-k3 128K 窗口预留输出与余量）
+TRUNCATE_LOW_TOKENS = 60_000    # 截断目标：切完留下足够增长空间
 
 # --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
