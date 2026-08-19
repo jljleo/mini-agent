@@ -44,17 +44,6 @@ def tool(name: str, description: str, properties: dict, required: list[str] | No
         return fn
     return decorator
 
-
-# Kimi 内置联网搜索工具：builtin_function 类型，由服务端执行。
-# 模型只生成搜索参数，客户端把参数原样回传即可（见 agent._execute_tool_call）。
-# 常驻顶层请求：Moonshot 要求 builtin 工具在每次请求的 tools 声明中完整携带。
-WEB_SEARCH_SCHEMA = {
-    "type": "builtin_function",
-    "function": {
-        "name": "$web_search",
-    },
-}
-
 # search_tools 自身的 schema：常驻工具的唯一事实来源，agent 直接引用
 SEARCH_TOOLS_SCHEMA = {
     "type": "function",

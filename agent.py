@@ -16,7 +16,6 @@ import os
 from openai import OpenAI
 from rich.console import Console
 
-import tools  # noqa: F401  导入即触发 @tool 注册，不能删
 from config import (
     API_KEY_ENV,
     BASE_URL,
@@ -25,7 +24,7 @@ from config import (
     SYSTEM_MESSAGES,
     TOOL_RESULT_PREVIEW_LEN,
 )
-from registry import SEARCH_TOOLS_SCHEMA, TOOLS, WEB_SEARCH_SCHEMA, get_all_tool_schemas
+from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas
 from streaming import stream_and_assemble
 
 console = Console()

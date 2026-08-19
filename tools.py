@@ -10,7 +10,7 @@ import subprocess
 
 from config import MAX_OUTPUT_LEN, MAX_TIMEOUT, PROJECT_ROOT
 from input_utils import confirm
-from registry import tool
+from tool_registry import tool
 
 
 # ---------- 文件窄接口工具：路径围栏 + 免确认 ----------
