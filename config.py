@@ -36,6 +36,9 @@ TOOL_ARG_ECHO_LEN = 60          # 占位符中参数回显的截断长度（防�
 # 触发阈值：历史总字符数低于此值完全不动作（保护 prompt cache）。
 # 粗估 1 token ≈ 2 字符（中英混合语料），80K 字符 ≈ 40K tokens。
 SLIM_TRIGGER_CHARS = 80_000
+# 收益门槛：本轮瘦身能省下的字符总量低于此值就不动——省几百字符却顶掉几千 tokens 的
+# 缓存前缀是净亏损（典型场景：reasoning 占大头、tool 结果很小的会话）
+SLIM_MIN_SAVINGS_CHARS = 2_000
 
 # --- L1 历史截断（compact.py，兜底防爆）---
 # 触发用估算 token（chars//2）：达到高水位才截，一刀切到低水位。

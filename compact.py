@@ -14,6 +14,7 @@ import json
 
 from config import (
     MODEL,
+    SLIM_MIN_SAVINGS_CHARS,
     SLIM_TRIGGER_CHARS,
     SUMMARIZE_MAX_CHARS,
     TOOL_ARG_ECHO_LEN,
@@ -27,6 +28,7 @@ def detect_slim_targets(
     keep_recent: int = TOOL_RESULT_KEEP_RECENT,
     min_len: int = TOOL_RESULT_MIN_SLIM_LEN,
     trigger_chars: int = SLIM_TRIGGER_CHARS,
+    min_savings: int = SLIM_MIN_SAVINGS_CHARS,
 ) -> set[int]:
     """检测需瘦身的 tool 消息下标：超龄（不在最近 keep_recent 条 tool 消息内）且原文够长。
 
@@ -34,14 +36,22 @@ def detect_slim_targets(
     按总消息数保护会让窗口随簇大小漂移。
     总字符数低于 trigger_chars 时返回空集：不动作 = prompt cache 完全无损。
     """
-    total_chars = sum(len(str(m.get("content") or "")) for m in messages)
+    # 与 L1 共用同一份估算口径（含 reasoning_content 与 tool_calls 参数），*2 换回字符数
+    total_chars = estimate_total_tokens(messages) * 2
     if total_chars < trigger_chars:
         return set()
 
     tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     # 切片写法兼容 keep_recent=0（[:-0] 会得到空列表，与语义相反）
     aged = tool_indices[: max(0, len(tool_indices) - keep_recent)]
-    return {i for i in aged if len(str(messages[i].get("content") or "")) >= min_len}
+    targets = {i for i in aged if len(str(messages[i].get("content") or "")) >= min_len}
+
+    # 收益门槛：省下总量太小就不动——瘦身会顶掉被改位置之后的缓存前缀，
+    # 省几百字符赔几千 tokens 的重算是净亏损（如 reasoning 占大头的会话）
+    savings = sum(len(str(messages[i].get("content") or "")) for i in targets)
+    if savings < min_savings:
+        return set()
+    return targets
 
 
 def apply_slimming(messages: list[dict], targets: set[int]) -> list[dict]:
@@ -86,6 +96,8 @@ def estimate_tokens(msg: dict) -> int:
     是 assistant 消息的体积大头。
     """
     chars = len(str(msg.get("content") or ""))
+    # kimi-k3 始终推理且 reasoning_content 随消息回传（缺了 400），是真实负载，必须计入
+    chars += len(str(msg.get("reasoning_content") or ""))
     for tc in msg.get("tool_calls") or []:
         chars += len(tc.get("function", {}).get("arguments") or "")
     return chars // 2
