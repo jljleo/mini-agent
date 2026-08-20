@@ -8,7 +8,9 @@ import unicodedata
 
 from agent import ChatSession
 from command_registry import command, COMMANDS
-from config import QUIT_COMMANDS, SYSTEM_MESSAGES
+from compact import detect_slim_targets, apply_slimming, estimate_total_tokens, detect_truncation_point, \
+    summarize_middle, extract_middle, apply_truncation
+from config import QUIT_COMMANDS, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
 
 _BOLD_CYAN = "\033[1;36m"
@@ -64,3 +66,27 @@ def cmd_tokens(session: ChatSession):
 def cmd_tools(session: ChatSession):
     schemas = [fn.tool_schema for fn in TOOLS.values() if hasattr(fn, "tool_schema")]
     _print_rows([(s["function"]["name"], s["function"]["description"]) for s in schemas])
+
+@command("/compact", "主动压缩早期历史（L2 摘要，失败回退硬切）")
+def cmd_compact(session: ChatSession):
+    # 手动压缩语义：用户下令即执行，不受自动水位线限制——直接向 LOW 水位切；
+    # 瘦身的触发/收益门槛同理跳过（trigger_chars=0, min_savings=0）
+    slimmed = apply_slimming(
+        session.messages,
+        detect_slim_targets(session.messages, trigger_chars=0, min_savings=0),
+    )
+    before = estimate_total_tokens(slimmed)
+    cut = detect_truncation_point(slimmed, TRUNCATE_LOW_TOKENS)
+    if not cut:
+        print(f"当前历史约 {before} tokens，规模健康，无需压缩")
+        return
+
+    session.compact_archive = list(session.messages)  # 归档原文：突变前的后悔药
+    # L2 优先：让模型把中段压缩成交接摘要；失败时 note=None 回退 L1 硬切标记
+    summary = summarize_middle(extract_middle(slimmed, cut), session.client)
+    note = f"[早期对话历史摘要]\n{summary}" if summary else None
+    session.messages = apply_truncation(slimmed, cut, note)
+
+    kind = "L2 摘要" if summary else "L1 硬切"
+    after = estimate_total_tokens(session.messages)
+    print(f"会话已压缩（{kind}）：约 {before} → {after} tokens，原文已归档到 session.compact_archive")
