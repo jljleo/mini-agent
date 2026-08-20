@@ -29,6 +29,7 @@ from config import (
 from compact import (
     apply_slimming,
     apply_truncation,
+    calibrate,
     detect_slim_targets,
     detect_truncation_point,
     estimate_total_tokens,
@@ -124,13 +125,24 @@ class ChatSession:
                           f"目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）\033[0m")
 
         for _ in range(MAX_TOOL_ROUNDS):
+            # 每轮重算投影：工具循环内历史只涨不停（单轮最多 30 次调用×10K 字符），
+            # 轮边界的检测看不见"单轮爆炸"，超线时应急升级截断（L1 硬切，不插 L2 调用）
+            payload = apply_truncation(apply_slimming(self.messages, slim_targets), cut, note)
+            if estimate_total_tokens(payload) >= TRUNCATE_HIGH_TOKENS:
+                escalated = detect_truncation_point(
+                    apply_slimming(self.messages, slim_targets), TRUNCATE_LOW_TOKENS)
+                if escalated > cut:
+                    cut, note = escalated, None
+                    payload = apply_truncation(apply_slimming(self.messages, slim_targets), cut, note)
+                    print("\033[90m[compact] 工具循环内上下文超限，已应急截断（L1）\033[0m")
+
             # 等待首字到达的间隙显示 spinner，填掉"静默尴尬期"
             with console.status("[dim]思考中...[/dim]", spinner="dots"):
                 completion = self.client.chat.completions.create(
                     model=MODEL,
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
                     # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
-                    messages=apply_truncation(apply_slimming(self.messages, slim_targets), cut, note),
+                    messages=payload,
                     tools=BASE_TOOLS,
                     stream=True,
                     stream_options={"include_usage": True}
@@ -139,6 +151,7 @@ class ChatSession:
             assistant_messages, usage = stream_and_assemble(completion)
 
             if usage:
+                calibrate(usage.prompt_tokens, payload)  # 用真实值校准估算系数，观测闭环
                 self.total_prompt_tokens += usage.prompt_tokens
                 self.total_completion_tokens += usage.completion_tokens
                 cached = getattr(usage, "cached_tokens", 0) or 0

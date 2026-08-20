@@ -9,7 +9,7 @@ import unicodedata
 from agent import ChatSession
 from command_registry import command, COMMANDS
 from compact import detect_slim_targets, apply_slimming, estimate_total_tokens, detect_truncation_point, \
-    summarize_middle, extract_middle, apply_truncation
+    summarize_middle, extract_middle, apply_truncation, current_chars_per_token
 from config import QUIT_COMMANDS, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
 
@@ -58,7 +58,8 @@ def cmd_tokens(session: ChatSession):
         ("prompt", f"{prompt} tokens"),
         ("completion", f"{completion} tokens"),
         ("累计", f"{prompt + completion} tokens"),
-        ("上下文", f"{len(session.messages)} 条消息"),
+        ("上下文", f"{len(session.messages)} 条消息（估算 {estimate_total_tokens(session.messages)} tokens）"),
+        ("估算系数", f"{current_chars_per_token():.2f} 字符/token（随真实 usage 动态校准）"),
     ])
 
 

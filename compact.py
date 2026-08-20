@@ -36,8 +36,8 @@ def detect_slim_targets(
     按总消息数保护会让窗口随簇大小漂移。
     总字符数低于 trigger_chars 时返回空集：不动作 = prompt cache 完全无损。
     """
-    # 与 L1 共用同一份估算口径（含 reasoning_content 与 tool_calls 参数），*2 换回字符数
-    total_chars = estimate_total_tokens(messages) * 2
+    # 与 L1 共用同一份负载口径（_count_chars：含 reasoning_content 与 tool_calls 参数）
+    total_chars = sum(_count_chars(m) for m in messages)
     if total_chars < trigger_chars:
         return set()
 
@@ -83,24 +83,55 @@ def _make_placeholder(messages: list[dict], index: int) -> str:
     return f"[历史工具结果已瘦身] {name}{args_echo}，原 {original_len} 字符。{hint}。"
 
 
+# ---- token 估算 ----
+
+# 字符/token 换算系数：初值 2.0 是中英代码混合语料的经验值，
+# 之后每轮用 API 返回的真实 prompt_tokens 做 EMA 校准（观测形成闭环）。
+_chars_per_token = 2.0
+
+
+def current_chars_per_token() -> float:
+    """当前校准后的换算系数（供 /tokens 等观测入口展示）。"""
+    return _chars_per_token
+
+
+def calibrate(real_tokens: int, messages: list[dict]) -> None:
+    """用一次真实请求的 prompt_tokens 校准估算系数（指数滑动平均）。
+
+    偏离越多调整越多；EMA 平滑单轮噪声。
+    注意 real_tokens 包含工具声明等消息外开销，会使估算略偏保守（安全方向）。
+    """
+    global _chars_per_token
+    chars = sum(_count_chars(m) for m in messages)
+    if real_tokens < 1_000 or chars < 1_000:
+        return  # 小样本噪声大，不校准
+    observed = chars / real_tokens  # 该轮真实的字符/token
+    _chars_per_token = min(6.0, max(0.8, 0.7 * _chars_per_token + 0.3 * observed))
+
+
 # ---- L1 截断 ----
 
 # 截断后在拼接处插入的标记：让模型知道历史被切过，而不是对话本来就这么多
 _TRUNCATION_MARKER = {"role": "system", "content": "[早期对话历史已截断，仅保留近期内容]"}
 
 
-def estimate_tokens(msg: dict) -> int:
-    """单条消息的 token 粗估（chars//2）。
+def _count_chars(msg: dict) -> int:
+    """单条消息的负载字符数：content + reasoning_content + tool_calls 参数。
 
-    tool_calls 的 arguments 必须计入：write_file 的整个文件内容在参数里，
-    是 assistant 消息的体积大头。
+    估算与校准共用的唯一口径——“什么算负载”只在这定义，防两处漏改。
+    reasoning_content 必须计入：kimi-k3 始终推理且随消息回传（缺了 400），是真实负载；
+    tool_calls 的 arguments 同理：write_file 的整个文件内容在参数里。
     """
     chars = len(str(msg.get("content") or ""))
-    # kimi-k3 始终推理且 reasoning_content 随消息回传（缺了 400），是真实负载，必须计入
     chars += len(str(msg.get("reasoning_content") or ""))
     for tc in msg.get("tool_calls") or []:
         chars += len(tc.get("function", {}).get("arguments") or "")
-    return chars // 2
+    return chars
+
+
+def estimate_tokens(msg: dict) -> int:
+    """单条消息的 token 估算：负载字符数 ÷ 动态校准的换算系数。"""
+    return int(_count_chars(msg) / _chars_per_token)
 
 
 def estimate_total_tokens(messages: list[dict]) -> int:
