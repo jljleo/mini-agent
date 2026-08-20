@@ -6,10 +6,16 @@
 - detect_truncation_point：反向装箱算截断点——从尾部往回装，装满低水位就停，
   再吸附到安全边界（不制造孤儿 tool 消息），O(n) 一趟无试错
 - apply_truncation：头部保留区（system 模板 + 动态注入的 tools 声明）+ 截断标记 + 尾部
+- extract_middle / summarize_middle：L2 摘要——被移出窗口的中段先让模型压缩成交接摘要
+  插回投影；摘要失败回退 L1 的截断标记（L1 是 L2 的 fallback）
 """
 
+import json
+
 from config import (
+    MODEL,
     SLIM_TRIGGER_CHARS,
+    SUMMARIZE_MAX_CHARS,
     TOOL_ARG_ECHO_LEN,
     TOOL_RESULT_KEEP_RECENT,
     TOOL_RESULT_MIN_SLIM_LEN,
@@ -154,14 +160,73 @@ def detect_truncation_point(messages: list[dict], budget_tokens: int) -> int:
     return cut
 
 
-def apply_truncation(messages: list[dict], cut: int) -> list[dict]:
-    """L1 投影：头部保留区 + 截断标记 + messages[cut:] 尾部。cut=0 时恒等返回原列表。"""
+def apply_truncation(messages: list[dict], cut: int, note: str | None = None) -> list[dict]:
+    """L1 投影：头部保留区 + 中间标记 + messages[cut:] 尾部。cut=0 时恒等返回原列表。
+
+    note 为 None 时是硬切标记（纯 L1）；传入 L2 摘要文本时标记变为摘要，同一切点保值。
+    """
     if cut <= 0:
         return messages
     prefix = _prefix_indices(messages)
     head = [m for i, m in enumerate(messages) if i in prefix]
     tail = [m for i, m in enumerate(messages) if i >= cut and i not in prefix]
-    return head + [_TRUNCATION_MARKER] + tail
+    # 实际没丢任何消息时不插标记（如首轮全在保留区导致的空中段），避免误导模型
+    dropped = len(messages) - len(head) - len(tail)
+    if dropped == 0:
+        return head + tail
+    marker = {"role": "system", "content": note} if note else _TRUNCATION_MARKER
+    return head + [marker] + tail
+
+
+# ---- L2 摘要 ----
+
+# 摘要模板：业界收敛的 anchored 四段结构（intent/changes/decisions/next steps）。
+# 要点：先求全再求精（Anthropic：maximize recall first）；技术细节逐字保留（失真高发区）；
+# 下一步要带停止条件（JetBrains：摘要会模糊自然停止信号，拖长轨迹）。
+SUMMARIZE_SYSTEM_PROMPT = (
+    "你正在执行上下文压缩：一段对话历史即将从模型的上下文窗口中移除，"
+    "你要把它压缩成一份给接手模型看的交接摘要。\n"
+    "要求：\n"
+    "1. 先求全再求精：宁多勿漏，高保真优先于简短。\n"
+    "2. 严格按四段输出：\n"
+    "   【原始意图】用户最初的目标\n"
+    "   【已完成】已做的改动/得出的结论（文件路径、命令、报错等关键细节逐字保留，不要改写）\n"
+    "   【关键决策】技术决策及原因\n"
+    "   【下一步】接下来要做什么，写明停止条件\n"
+    "3. 只输出摘要正文，不要任何客套话。"
+)
+
+
+def extract_middle(messages: list[dict], cut: int) -> list[dict]:
+    """提取将被移出窗口的中段（L2 摘要的输入）：cut 之前且不属于头部保留区的消息。"""
+    prefix = _prefix_indices(messages)
+    return [m for i, m in enumerate(messages) if i < cut and i not in prefix]
+
+
+def summarize_middle(middle: list[dict], client, model: str = MODEL) -> str | None:
+    """调用模型把中段历史压缩成交接摘要；任何失败返回 None（上层回退 L1 硬切）。
+
+    L2 被触发的时刻正是上下文将爆的压力时刻，摘要请求自身失败概率偏高，
+    所以这里必须静默容错，绝不能让压缩动作把主流程拖崩。
+    """
+    if not middle:
+        return None
+    serialized = json.dumps(middle, ensure_ascii=False, default=str)
+    if len(serialized) > SUMMARIZE_MAX_CHARS:
+        serialized = "...（更早部分略）\n" + serialized[-SUMMARIZE_MAX_CHARS:]
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT},
+                {"role": "user", "content": "请压缩以下对话历史：\n\n" + serialized},
+            ],
+            stream=False,
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        print(f"\033[93m[compact] L2 摘要失败（{type(e).__name__}），回退 L1 硬切\033[0m")
+        return None
 
 
 def _find_args_echo(messages: list[dict], index: int) -> str:

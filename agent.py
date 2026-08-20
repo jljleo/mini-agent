@@ -32,6 +32,8 @@ from compact import (
     detect_slim_targets,
     detect_truncation_point,
     estimate_total_tokens,
+    extract_middle,
+    summarize_middle,
 )
 from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas
 from streaming import stream_and_assemble
@@ -104,12 +106,22 @@ class ChatSession:
         slim_targets = detect_slim_targets(self.messages)
         if slim_targets:
             print(f"\033[90m[compact] 已瘦身 {len(slim_targets)} 条超龄工具结果\033[0m")
+        # 切点计算也基于瘦身后的投影：占位符只有 ~100 字符，按原始体积装箱会误多切；
+        # 瘦身不改消息数量与顺序，下标与原始历史完全对齐，投影可直接复用
+        slimmed = apply_slimming(self.messages, slim_targets)
         cut = 0
-        if estimate_total_tokens(apply_slimming(self.messages, slim_targets)) >= TRUNCATE_HIGH_TOKENS:
-            cut = detect_truncation_point(self.messages, TRUNCATE_LOW_TOKENS)
+        note = None
+        if estimate_total_tokens(slimmed) >= TRUNCATE_HIGH_TOKENS:
+            cut = detect_truncation_point(slimmed, TRUNCATE_LOW_TOKENS)
             if cut:
-                print(f"\033[90m[compact] 上下文超限，已截断早期历史"
-                      f"（目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）\033[0m")
+                # L2 优先：让模型把中段压缩成交接摘要；失败时 note=None 回退 L1 硬切标记
+                summary = summarize_middle(extract_middle(slimmed, cut), self.client)
+                if summary:
+                    note = f"[早期对话历史摘要]\n{summary}"
+                    print("\033[90m[compact] 上下文超限，已生成早期历史摘要（L2）\033[0m")
+                else:
+                    print(f"\033[90m[compact] 上下文超限，已截断早期历史（L1，"
+                          f"目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）\033[0m")
 
         for _ in range(MAX_TOOL_ROUNDS):
             # 等待首字到达的间隙显示 spinner，填掉"静默尴尬期"
@@ -117,7 +129,8 @@ class ChatSession:
                 completion = self.client.chat.completions.create(
                     model=MODEL,
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
-                    messages=apply_truncation(apply_slimming(self.messages, slim_targets), cut),
+                    # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
+                    messages=apply_truncation(apply_slimming(self.messages, slim_targets), cut, note),
                     tools=BASE_TOOLS,
                     stream=True,
                     stream_options={"include_usage": True}
