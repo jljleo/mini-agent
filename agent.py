@@ -19,6 +19,7 @@ from rich.console import Console
 from config import (
     API_KEY_ENV,
     BASE_URL,
+    MAX_SAME_TOOL_CALLS,
     MAX_TOOL_ROUNDS,
     MODEL,
     SYSTEM_MESSAGES,
@@ -48,7 +49,6 @@ console = Console()
 # 接入代码（agent._execute_tool_call 的 echo 逻辑）已就绪，平台修复后加回 BASE_TOOLS 即可。
 BASE_TOOLS = [SEARCH_TOOLS_SCHEMA]
 
-
 class ChatSession:
     """一轮完整的多轮对话会话：封装 messages 与 client，避免全局状态。"""
 
@@ -59,7 +59,6 @@ class ChatSession:
         # token 仪表盘：会话累计消耗
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
-
     # ---- 历史管理 ----
 
     def mark(self) -> int:
@@ -124,6 +123,10 @@ class ChatSession:
                     print(f"\033[90m[compact] 上下文超限，已截断早期历史（L1，"
                           f"目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）\033[0m")
 
+        # 死循环保险丝状态：跟踪连续重复的 (工具名, 参数) 签名
+        last_call_sig = None
+        same_call_count = 0
+
         for _ in range(MAX_TOOL_ROUNDS):
             # 每轮重算投影：工具循环内历史只涨不停（单轮最多 30 次调用×10K 字符），
             # 轮边界的检测看不见"单轮爆炸"，超线时应急升级截断（L1 硬切，不插 L2 调用）
@@ -181,7 +184,29 @@ class ChatSession:
                     print("********************************")
                     return
 
-                for tool_call in tool_calls:
+                for i, tool_call in enumerate(tool_calls):
+                    # 死循环保险丝（行为识别）：同一 (工具名, 参数) 连续出现 N 次即判定卡死。
+                    # 正常任务每次调用参数不同不会误伤；真卡死的模型几轮内被揪出
+                    sig = (
+                        tool_call["function"].get("name"),
+                        tool_call["function"].get("arguments") or "{}",
+                    )
+                    same_call_count = same_call_count + 1 if sig == last_call_sig else 1
+                    last_call_sig = sig
+                    if same_call_count >= MAX_SAME_TOOL_CALLS:
+                        print(f"\n\033[93m[警告] 同一工具调用连续重复 {same_call_count} 次"
+                              f"（{sig[0]}），判定死循环，已强制结束本轮\033[0m")
+                        # 为当前及剩余 tool_calls 补拦截结果：缺响应的 tool_calls 是孤儿，
+                        # 下次请求必 400
+                        for tc in tool_calls[i:]:
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id"),
+                                "name": tc["function"].get("name"),
+                                "content": "[系统] 同一调用连续重复，已拦截。请停止重试，基于已有信息给出结论。",
+                            })
+                        return
+
                     name, tool_result = self._execute_tool_call(tool_call)
                     self.messages.append(
                         {
