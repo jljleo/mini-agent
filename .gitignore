@@ -3,3 +3,4 @@
 __pycache__/
 .chat_history
 session_todos.json
+.session.json

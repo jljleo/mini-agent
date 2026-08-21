@@ -57,6 +57,7 @@ SUMMARIZE_MAX_CHARS = 150_000  # 摘要输入上限：中段超长时只取靠�
 # --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历史（跨会话）
+SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/resume 恢复用）
 
 # --- system 提示词 ---
 SYSTEM_MESSAGES = [
