@@ -38,8 +38,9 @@ def stream_and_assemble(completion) -> tuple[list[dict], CompletionUsage | None]
             if delta.role:
                 message["role"] = delta.role
 
-            # kimi-k3 始终推理：思考过程逐块到达，必须拼进消息里——
-            # 带 tool_calls 的 assistant 消息缺 reasoning_content 会被 API 拒绝（400）
+            # kimi-k3 始终推理：思考过程逐块到达，拼进消息里保留。
+            # 注：早期版本缺 reasoning_content 会 400，2026-08 实测平台已不再强制
+            # （占位符/空串/完全缺失均通过校验）——L3.5 清理旧推理的前置障碍已消除
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
                 message["reasoning_content"] = message.get("reasoning_content", "") + reasoning

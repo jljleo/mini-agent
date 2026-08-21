@@ -30,9 +30,9 @@ def detect_slim_targets(
     trigger_chars: int = SLIM_TRIGGER_CHARS,
     min_savings: int = SLIM_MIN_SAVINGS_CHARS,
 ) -> set[int]:
-    """检测需瘦身的 tool 消息下标：超龄（不在最近 keep_recent 条 tool 消息内）且原文够长。
+    """检测需瘦身的消息下标：超龄 tool 结果（L3）+ 超龄 assistant 的长推理（L3.5）。
 
-    保护窗口按 tool 消息计数而非全部消息：agent 循环中 tool 消息成簇出现，
+    保护窗口按角色各自计数（默认最近 5 条不动）：agent 循环中 tool 消息成簇出现，
     按总消息数保护会让窗口随簇大小漂移。
     总字符数低于 trigger_chars 时返回空集：不动作 = prompt cache 完全无损。
     """
@@ -41,14 +41,25 @@ def detect_slim_targets(
     if total_chars < trigger_chars:
         return set()
 
-    tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
     # 切片写法兼容 keep_recent=0（[:-0] 会得到空列表，与语义相反）
-    aged = tool_indices[: max(0, len(tool_indices) - keep_recent)]
-    targets = {i for i in aged if len(str(messages[i].get("content") or "")) >= min_len}
+    tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    aged_tools = tool_indices[: max(0, len(tool_indices) - keep_recent)]
+    targets = {i for i in aged_tools if len(str(messages[i].get("content") or "")) >= min_len}
+
+    # L3.5：超龄 assistant 的旧推理——价值在产生当轮已兑现（结论在 content 里），
+    # 是典型“低价值大体积”。已实测占位符/缺失均过 API 校验（2026-08-20）
+    asst_indices = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
+    aged_assts = asst_indices[: max(0, len(asst_indices) - keep_recent)]
+    targets |= {i for i in aged_assts
+                if len(str(messages[i].get("reasoning_content") or "")) >= min_len}
 
     # 收益门槛：省下总量太小就不动——瘦身会顶掉被改位置之后的缓存前缀，
-    # 省几百字符赔几千 tokens 的重算是净亏损（如 reasoning 占大头的会话）
-    savings = sum(len(str(messages[i].get("content") or "")) for i in targets)
+    # 省几百字符赔几千 tokens 的重算是净亏损
+    savings = sum(
+        len(str(messages[i].get("content") or "")) if messages[i].get("role") == "tool"
+        else len(str(messages[i].get("reasoning_content") or ""))
+        for i in targets
+    )
     if savings < min_savings:
         return set()
     return targets
@@ -64,8 +75,16 @@ def apply_slimming(messages: list[dict], targets: set[int]) -> list[dict]:
         return messages
     out = list(messages)  # 浅拷贝列表壳，dict 仍共享；只给被改的消息造新 dict
     for index in targets:
-        if 0 <= index < len(out) and out[index].get("role") == "tool":
+        if not 0 <= index < len(out):
+            continue
+        role = out[index].get("role")
+        if role == "tool":
             out[index] = {**out[index], "content": _make_placeholder(messages, index)}
+        elif role == "assistant" and out[index].get("reasoning_content"):
+            # L3.5：只换 reasoning_content，content/tool_calls 原样保留（配对结构不动）
+            original_len = len(str(out[index]["reasoning_content"]))
+            out[index] = {**out[index],
+                          "reasoning_content": f"[历史推理已省略，原 {original_len} 字符]"}
     return out
 
 
