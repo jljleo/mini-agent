@@ -23,6 +23,7 @@ from config import (
     MAX_TOOL_ROUNDS,
     MODEL,
     SYSTEM_MESSAGES,
+    SESSION_FILE,
     TOOL_RESULT_PREVIEW_LEN,
     TRUNCATE_HIGH_TOKENS,
     TRUNCATE_LOW_TOKENS,
@@ -46,6 +47,18 @@ from streaming import stream_and_assemble
 # （官方论坛 2026-07-23 已报，未修；kimi-k2.6 正常但 k2.6 不支持动态工具注入机制）。
 # 接入代码（agent._execute_tool_call 的 echo 逻辑）已就绪，平台修复后加回 BASE_TOOLS 即可。
 BASE_TOOLS = [SEARCH_TOOLS_SCHEMA]
+
+def load_saved_session() -> dict | None:
+    """读取会话存档；不存在或损坏返回 None（存档是增强，不是依赖）。"""
+    if not os.path.exists(SESSION_FILE):
+        return None
+    try:
+        with open(SESSION_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data.get("messages"), list) else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
 
 class ChatSession:
     """一轮完整的多轮对话会话：封装 messages 与 client，避免全局状态。"""
@@ -72,6 +85,20 @@ class ChatSession:
     def rollback(self, mark: int) -> None:
         """撤销 mark 之后产生的所有消息（异常整体回滚）。"""
         del self.messages[mark:]
+
+    # ---- 会话存档（/resume 的存储层）----
+
+    def save(self) -> None:
+        """会话存档：原子写（tmp + replace），进程崩溃不留半截文件。"""
+        data = {
+            "messages": self.messages,
+            "total_prompt_tokens": self.total_prompt_tokens,
+            "total_completion_tokens": self.total_completion_tokens,
+        }
+        tmp = SESSION_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, SESSION_FILE)
 
     def _tools_already_injected(self) -> bool:
         """是否已注入过动态工具声明（保证幂等，避免重复注入撑胖上下文）。"""

@@ -5,14 +5,16 @@
 取代旧版手工 \\033 + east_asian_width 对齐）。
 """
 
+import os
+
 from rich.table import Table
 
 import ui
-from agent import ChatSession
+from agent import ChatSession, load_saved_session
 from command_registry import command, COMMANDS
 from compact import detect_slim_targets, apply_slimming, estimate_total_tokens, detect_truncation_point, \
     summarize_middle, extract_middle, apply_truncation, current_chars_per_token
-from config import QUIT_COMMANDS, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
+from config import QUIT_COMMANDS, SESSION_FILE, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
 from tools import clear_todo_file
 
@@ -41,6 +43,8 @@ def cmd_clear(session: ChatSession, args: str = ""):
     session.total_prompt_tokens = 0
     session.total_completion_tokens = 0
     clear_todo_file()
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)  # 存档一并清除：/clear 后 /resume 不应复活旧会话
     ui.success("会话已清空，开始新的对话")
 
 
@@ -61,6 +65,26 @@ def cmd_tokens(session: ChatSession, args: str = ""):
 def cmd_tools(session: ChatSession, args: str = ""):
     schemas = [fn.tool_schema for fn in TOOLS.values() if hasattr(fn, "tool_schema")]
     _render_rows([(s["function"]["name"], s["function"]["description"]) for s in schemas])
+
+
+@command("/resume", "恢复上次保存的会话")
+def cmd_resume(session: ChatSession, args: str = ""):
+    data = load_saved_session()
+    if not data:
+        ui.note("没有可恢复的会话存档")
+        return
+    session.messages = data["messages"]
+    session.total_prompt_tokens = data.get("total_prompt_tokens", 0)
+    session.total_completion_tokens = data.get("total_completion_tokens", 0)
+    ui.success(f"已恢复会话：{len(session.messages)} 条消息"
+               f"（估算 {estimate_total_tokens(session.messages):,} tokens）")
+    # 最近一条用户消息作为话题提示，帮助用户回忆起上下文
+    last_user = next(
+        (str(m.get("content", "")) for m in reversed(session.messages) if m.get("role") == "user"),
+        "",
+    )
+    if last_user:
+        ui.note(f"最近话题：{last_user[:50]}{'...' if len(last_user) > 50 else ''}")
 
 
 @command("/compact", "主动压缩早期历史（L2 摘要，失败回退硬切）")
@@ -86,3 +110,4 @@ def cmd_compact(session: ChatSession, args: str = ""):
     kind = "L2 摘要" if summary else "L1 硬切"
     after = estimate_total_tokens(session.messages)
     ui.success(f"会话已压缩（{kind}）：约 {before:,} → {after:,} tokens，原文已归档到 session.compact_archive")
+    session.save()  # 突变后立即落盘，保持存档与内存一致
