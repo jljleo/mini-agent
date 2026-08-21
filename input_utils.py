@@ -3,8 +3,11 @@
 全程序只此一套输入体系（prompt_toolkit），避免多处 input()/select 混用
 导致 stdin 缓冲冲突（正是"输 y 卡死"的根因）。
 
-终端下用 prompt_toolkit（历史/行编辑/单键确认），管道/重定向退回原始读法。
+终端下用 prompt_toolkit（历史/行编辑/幽灵建议/单键确认），管道/重定向退回原始读法。
 所有输入统一 sanitize：NFC 规范化 + 控制字符过滤。
+
+界面元素（❯ 提示符样式、底部状态栏、确认框文案）的配色与文案定义在 ui.py，
+本模块只负责装配 prompt_toolkit 部件。
 """
 
 import sys
@@ -12,17 +15,52 @@ import threading
 import unicodedata
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import ANSI
+from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style
 
+import ui
 from command_registry import COMMANDS
 from config import HISTORY_FILE
 
 # prompt_toolkit 会话（惰性创建）：历史记录存项目目录，↑ 键可翻出历史提问（跨会话保留）
 # 惰性原因：模块级创建在非 tty 环境（管道输入）会打印警告
 _prompt_session: PromptSession | None = None
+
+# 底部状态栏内容提供者（main 启动时注入 ChatSession.status_text）：
+# 每次按键重绘，显示 模型 · token 累计 等会话状态
+_status_provider = None
+
+_PROMPT_STYLE = Style.from_dict(
+    {
+        "prompt": "ansicyan bold",
+        "bottom-toolbar": "bg:#262626 #808080",
+        "auto-suggest": "#585858",
+        "completion-menu": "bg:#1c1c1c #d0d0d0",
+        "completion-menu.completion.current": "bg:#005f5f #ffffff",
+        "completion-menu.meta": "bg:#1c1c1c #808080",
+    }
+)
+
+
+def set_status_provider(fn) -> None:
+    """注入底部状态栏的内容回调（返回一行纯文本）。"""
+    global _status_provider
+    _status_provider = fn
+
+
+def _bottom_toolbar() -> HTML:
+    if _status_provider is None:
+        return HTML("<bottom-toolbar> </bottom-toolbar>")
+    try:
+        text = _status_provider()
+    except Exception:
+        # 状态栏是装饰件：任何异常都不许影响输入主流程
+        text = ""
+    return HTML(f"<bottom-toolbar> {text} </bottom-toolbar>")
 
 
 class SlashCommandCompleter(Completer):
@@ -50,6 +88,9 @@ def _get_prompt_session() -> PromptSession:
         _prompt_session = PromptSession(
             history=FileHistory(HISTORY_FILE),
             completer=SlashCommandCompleter(),
+            auto_suggest=AutoSuggestFromHistory(),  # 历史幽灵建议：灰色尾随，→ 键采纳
+            style=_PROMPT_STYLE,
+            bottom_toolbar=_bottom_toolbar,
         )
     return _prompt_session
 
@@ -71,8 +112,8 @@ def read_input(prompt: str = "") -> str:
     由调用方决定如何收尾。
     """
     if sys.stdin.isatty():
-        # prompt_toolkit 遇到 Ctrl+C/Ctrl+D 会抛 KeyboardInterrupt/EOFError
-        return sanitize(_get_prompt_session().prompt(prompt))
+        # ❯ 提示符：品牌色加粗；prompt_toolkit 遇到 Ctrl+C/Ctrl+D 抛 KeyboardInterrupt/EOFError
+        return sanitize(_get_prompt_session().prompt(HTML("<prompt>❯</prompt> ")))
 
     # 非交互环境（管道/重定向）：prompt_toolkit 不适用，退回字节读取
     print(prompt, end="", flush=True)
@@ -116,7 +157,7 @@ def _single_key_confirm(message: str) -> bool:
     session: PromptSession = PromptSession(key_bindings=kb)
     # prompt 返回 event.app.exit 的 result；异常（如 Ctrl+D）一律视为拒绝。
     # ANSI() 包装：prompt_toolkit 对纯字符串不解析转义序列（安全设计），
-    # 需显式声明“此文本含 ANSI 颜色码”，否则 \033 会以 ^[ 形式原样显示
+    # 需显式声明"此文本含 ANSI 颜色码"，否则 \033 会以 ^[ 形式原样显示
     try:
         return bool(session.prompt(ANSI(message)))
     except (EOFError, KeyboardInterrupt):
@@ -132,15 +173,10 @@ def confirm(command: str, dangerous: bool) -> bool:
       3. 只有明确按 y 才放行。
     """
     if not sys.stdin.isatty():
-        print("\n\033[91m[拒绝] 非交互环境无法确认，已默认拒绝执行该命令\033[0m", flush=True)
+        ui.error("非交互环境无法确认，已默认拒绝执行该命令")
         return False
 
-    color = "\033[91m" if dangerous else "\033[93m"  # 危险=红，普通=黄
-    label = "危险命令" if dangerous else "需要确认"
-    message = (
-        f"\n{color}[{label}] 即将在项目目录执行: {command}\n"
-        f"确认执行? (y/N，单键生效，{CONFIRM_TIMEOUT}s 超时): \033[0m"
-    )
+    message = ui.confirm_prompt_text(command, dangerous, CONFIRM_TIMEOUT)
 
     # 单键确认放子线程跑，主线程 join 超时：超时即拒绝。
     # 直接调用会阻塞主线程，无法对 prompt_toolkit 自身施加超时。
@@ -155,7 +191,7 @@ def confirm(command: str, dangerous: bool) -> bool:
 
     if worker.is_alive():
         # 超时：prompt_toolkit 还在等键，判定为假 tty，拒绝
-        print(f"\n\033[91m[拒绝] {CONFIRM_TIMEOUT}s 内未收到确认，已默认拒绝\033[0m", flush=True)
+        ui.error(f"{CONFIRM_TIMEOUT}s 内未收到确认，已默认拒绝")
         return False
 
     return result["answer"]

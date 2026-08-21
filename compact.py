@@ -12,6 +12,7 @@
 
 import json
 
+import ui
 from config import (
     MODEL,
     SLIM_MIN_SAVINGS_CHARS,
@@ -289,7 +290,7 @@ def summarize_middle(middle: list[dict], client, model: str = MODEL) -> str | No
         )
         return resp.choices[0].message.content
     except Exception as e:
-        print(f"\033[93m[compact] L2 摘要失败（{type(e).__name__}），回退 L1 硬切\033[0m")
+        ui.note(f"L2 摘要失败（{type(e).__name__}），回退 L1 硬切", tag="compact")
         return None
 
 

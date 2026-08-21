@@ -1,14 +1,16 @@
 """流式响应拼装：把 SSE chunk 流聚合成完整的 assistant 消息。
 
 模型流式返回时，content 逐字到达、tool_calls 按碎片分片，
-本模块负责边收边打印（content）+ 逐步拼装（tool_calls），输出定稿消息。
+本模块负责逐步拼装，输出定稿消息；渲染委托给注入的 renderer
+（ui.StreamRenderer：on_reasoning / on_content 回调），本模块不感知终端。
+renderer 为 None 时 content 退化为纯文本直出（兜底路径）。
 """
 
 from openai.types import CompletionUsage
 
 
-def stream_and_assemble(completion) -> tuple[list[dict], CompletionUsage | None]:
-    """遍历流式 chunk：content 边收边打印，tool_calls 碎片逐步拼装。
+def stream_and_assemble(completion, renderer=None) -> tuple[list[dict], CompletionUsage | None]:
+    """遍历流式 chunk：reasoning/content 回调 renderer，tool_calls 碎片逐步拼装。
 
     返回 (组装定稿的 assistant 消息列表, usage 对象或 None)。
     usage 是请求级元数据（账单），只走返回值通道，不写进消息体——避免随历史回传 API。
@@ -44,10 +46,15 @@ def stream_and_assemble(completion) -> tuple[list[dict], CompletionUsage | None]
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
                 message["reasoning_content"] = message.get("reasoning_content", "") + reasoning
+                if renderer:
+                    renderer.on_reasoning(reasoning)
 
             content = delta.content
             if content:  # 大部分 chunk 的 content 是 None，必须守卫
-                print(content, end="", flush=True)
+                if renderer:
+                    renderer.on_content(content)
+                else:
+                    print(content, end="", flush=True)  # 兜底：无渲染器时纯文本直出
                 message["content"] = message.get("content", "") + content
 
             if delta.tool_calls:

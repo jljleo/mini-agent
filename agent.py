@@ -14,8 +14,8 @@ import json
 import os
 
 from openai import OpenAI
-from rich.console import Console
 
+import ui
 from config import (
     API_KEY_ENV,
     BASE_URL,
@@ -40,8 +40,6 @@ from compact import (
 from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas
 from streaming import stream_and_assemble
 
-console = Console()
-
 # 顶层请求常驻的工具：search_tools（动态发现入口）
 # NOTE: $web_search（WEB_SEARCH_SCHEMA）暂不常驻——Moonshot 平台 bug：
 # kimi-k3 上回传 builtin_function 工具结果必现 400 tokenization failed
@@ -59,6 +57,12 @@ class ChatSession:
         # token 仪表盘：会话累计消耗
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+
+    def status_text(self) -> str:
+        """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。"""
+        total = self.total_prompt_tokens + self.total_completion_tokens
+        return f"{MODEL} · tokens {total:,}"
+
     # ---- 历史管理 ----
 
     def mark(self) -> int:
@@ -79,8 +83,8 @@ class ChatSession:
         """执行单个工具调用，返回 (工具名, 结果文本)。任何失败都转为文本结果，不向上抛。"""
         name = tool_call["function"].get("name")
         raw_arguments = tool_call["function"].get("arguments") or "{}"
-        # 灰色打印调用过程，让用户看见 agent 在干什么
-        print(f"\n\033[90m[调用工具] {name}({raw_arguments})\033[0m", flush=True)
+        # 工具调用可视化（⏺ 面板）：让用户看见 agent 在干什么，兼作"幻觉测谎仪"
+        ui.tool_call(name, raw_arguments)
         try:
             if name == "$web_search":
                 # Kimi 内置工具：服务端执行搜索，客户端只需把参数原样回传
@@ -92,8 +96,8 @@ class ChatSession:
                 result = str(TOOLS[name](**arguments))  # 兜底：工具可能返回非字符串
         except Exception as e:
             result = f"调用失败: {type(e).__name__}: {e}"
-        preview = result if len(result) <= TOOL_RESULT_PREVIEW_LEN else result[:TOOL_RESULT_PREVIEW_LEN] + "..."
-        print(f"\033[90m[工具结果] {preview}\033[0m", flush=True)
+        preview = result if len(result) <= TOOL_RESULT_PREVIEW_LEN else result[:TOOL_RESULT_PREVIEW_LEN] + "…"
+        ui.tool_result(preview)
         return name, result
 
     # ---- 主循环 ----
@@ -105,7 +109,7 @@ class ChatSession:
         # 历史管理管道（轮边界检测一次）：先 L3 瘦身，瘦身后估算仍超硬水位才 L1 截断
         slim_targets = detect_slim_targets(self.messages)
         if slim_targets:
-            print(f"\033[90m[compact] 已瘦身 {len(slim_targets)} 条超龄工具结果\033[0m")
+            ui.note(f"已瘦身 {len(slim_targets)} 条超龄工具结果", tag="compact")
         # 切点计算也基于瘦身后的投影：占位符只有 ~100 字符，按原始体积装箱会误多切；
         # 瘦身不改消息数量与顺序，下标与原始历史完全对齐，投影可直接复用
         slimmed = apply_slimming(self.messages, slim_targets)
@@ -118,10 +122,10 @@ class ChatSession:
                 summary = summarize_middle(extract_middle(slimmed, cut), self.client)
                 if summary:
                     note = f"[早期对话历史摘要]\n{summary}"
-                    print("\033[90m[compact] 上下文超限，已生成早期历史摘要（L2）\033[0m")
+                    ui.note("上下文超限，已生成早期历史摘要（L2）", tag="compact")
                 else:
-                    print(f"\033[90m[compact] 上下文超限，已截断早期历史（L1，"
-                          f"目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）\033[0m")
+                    ui.note(f"上下文超限，已截断早期历史（L1，目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）",
+                            tag="compact")
 
         # 死循环保险丝状态：跟踪连续重复的 (工具名, 参数) 签名
         last_call_sig = None
@@ -137,10 +141,10 @@ class ChatSession:
                 if escalated > cut:
                     cut, note = escalated, None
                     payload = apply_truncation(apply_slimming(self.messages, slim_targets), cut, note)
-                    print("\033[90m[compact] 工具循环内上下文超限，已应急截断（L1）\033[0m")
+                    ui.note("工具循环内上下文超限，已应急截断（L1）", tag="compact")
 
-            # 等待首字到达的间隙显示 spinner，填掉"静默尴尬期"
-            with console.status("[dim]思考中...[/dim]", spinner="dots"):
+            # StreamRenderer：spinner 等首字 → 思考暗色预览 → 正文 Markdown 流式渲染
+            with ui.StreamRenderer() as renderer:
                 completion = self.client.chat.completions.create(
                     model=MODEL,
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
@@ -150,8 +154,7 @@ class ChatSession:
                     stream=True,
                     stream_options={"include_usage": True}
                 )
-
-            assistant_messages, usage = stream_and_assemble(completion)
+                assistant_messages, usage = stream_and_assemble(completion, renderer)
 
             if usage:
                 calibrate(usage.prompt_tokens, payload)  # 用真实值校准估算系数，观测闭环
@@ -159,29 +162,24 @@ class ChatSession:
                 self.total_completion_tokens += usage.completion_tokens
                 cached = getattr(usage, "cached_tokens", 0) or 0
                 total = self.total_prompt_tokens + self.total_completion_tokens
-                print(
-                    f"\n\033[90m[tokens] 本轮 prompt={usage.prompt_tokens} completion={usage.completion_tokens}"
-                    f"（缓存命中 {cached}）｜累计 {total}\033[0m"
-                )
+                ui.token_line(usage.prompt_tokens, usage.completion_tokens, cached, total)
 
             for assistant_message in assistant_messages:
                 finish_reason = assistant_message.pop("_finish_reason", None)
                 if finish_reason == "length":
                     if assistant_message.get("tool_calls"):
                         # 截断发生在工具调用轮：arguments JSON 不完整，后续 json 解析失败属预期
-                        print("\n\033[93m[警告] 输出被 max_tokens 截断：工具调用参数不完整，若解析失败即为此因\033[0m")
+                        ui.warn("输出被 max_tokens 截断：工具调用参数不完整，若解析失败即为此因")
                     else:
-                        print("\n\033[93m[警告] 输出被 max_tokens 截断，回答可能不完整\033[0m")
+                        ui.warn("输出被 max_tokens 截断，回答可能不完整")
                 elif finish_reason == "content_filter":
-                    print("\n\033[93m[警告] 内容被安全审查拦截\033[0m")
+                    ui.warn("内容被安全审查拦截")
 
                 self.messages.append(assistant_message)
 
                 tool_calls = assistant_message.get("tool_calls")
                 if not tool_calls:
-                    # content 已在流式过程中边收边打印，这里只补换行和分隔线
-                    print()
-                    print("********************************")
+                    # 终稿：content 已由 StreamRenderer 渲染完毕，直接结束本轮
                     return
 
                 for i, tool_call in enumerate(tool_calls):
@@ -194,8 +192,8 @@ class ChatSession:
                     same_call_count = same_call_count + 1 if sig == last_call_sig else 1
                     last_call_sig = sig
                     if same_call_count >= MAX_SAME_TOOL_CALLS:
-                        print(f"\n\033[93m[警告] 同一工具调用连续重复 {same_call_count} 次"
-                              f"（{sig[0]}），判定死循环，已强制结束本轮\033[0m")
+                        ui.warn(f"同一工具调用连续重复 {same_call_count} 次（{sig[0]}），"
+                                f"判定死循环，已强制结束本轮")
                         # 为当前及剩余 tool_calls 补拦截结果：缺响应的 tool_calls 是孤儿，
                         # 下次请求必 400
                         for tc in tool_calls[i:]:
@@ -223,4 +221,4 @@ class ChatSession:
                             {"role": "system", "tools": get_all_tool_schemas()}
                         )
         else:
-            print(f"[Warning] 工具调用超过 {MAX_TOOL_ROUNDS} 轮，已强制结束本轮对话")
+            ui.warn(f"工具调用超过 {MAX_TOOL_ROUNDS} 轮，已强制结束本轮对话")

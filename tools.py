@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 
+import ui
 from config import MAX_OUTPUT_LEN, MAX_TIMEOUT, PROJECT_ROOT
 from input_utils import confirm
 from tool_registry import tool
@@ -126,7 +127,7 @@ def _load_rules() -> list[dict]:
         with open(rules_path, "r", encoding="utf-8") as f:
             return json.load(f).get("rules", [])
     except (json.JSONDecodeError, OSError) as e:
-        print(f"\033[93m[权限] permissions.json 解析失败（{e}），本次按空规则表处理\033[0m")
+        ui.warn(f"permissions.json 解析失败（{e}），本次按空规则表处理")
         return []
 
 
