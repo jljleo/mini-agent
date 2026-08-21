@@ -1,11 +1,12 @@
 """业务工具实现：用 @tool 装饰器注册到 registry。
 
 文件工具（read_file/write_file/edit_file）为窄接口：路径围栏代码级强制、
-免人工确认；run_bash 为通用接口：白名单免确认 + 其余人工审批。
+免人工确认；run_bash 为通用接口：permissions.json 规则裁决 + 人工审批兑底。
 两者并存——文件操作走窄接口，真正的命令走 bash。
 """
 import json
 import os
+import re
 import subprocess
 
 from config import MAX_OUTPUT_LEN, MAX_TIMEOUT, PROJECT_ROOT
@@ -105,12 +106,9 @@ def edit_file(path: str, old: str, new: str) -> str:
     return f"Edited {path}: replaced 1 occurrence"
 
 
-# 只读安全命令白名单：命中则免确认直接执行；
-# 其余命令一律需要人工确认（默认怀疑，而非默认信任——白名单外的世界交给用户审查）
-SAFE_PREFIXES = (
-    "ls", "pwd", "cat ", "echo ", "grep", "find", "head", "tail", "wc", "date",
-    "git status", "git log", "git diff", "git show", "git branch",
-)
+# 权限规则：permissions.json 是唯一事实来源（原 SAFE_PREFIXES 已迁入）。
+# 评估语义：deny 优先于 allow 优先于默认 ask——最保守的匹配获胜。
+# 每条命令实时读文件：改规则无需重启（热加载），文件小，开销可忽略。
 
 # 危险命令关键词：即使在确认环节也用红色高亮提醒（黑名单仅作提示，不能替代人工审查）
 DANGEROUS_PATTERNS = [
@@ -119,9 +117,31 @@ DANGEROUS_PATTERNS = [
 ]
 
 
-def _is_safe(command: str) -> bool:
-    """命令是否命中只读白名单（免确认）。"""
-    return command.strip().startswith(SAFE_PREFIXES)
+def _load_rules() -> list[dict]:
+    """加载 permissions.json 的规则表；文件缺失或损坏按空表处理（绝不拖垮 bash）。"""
+    rules_path = os.path.join(PROJECT_ROOT, "permissions.json")
+    if not os.path.exists(rules_path):
+        return []
+    try:
+        with open(rules_path, "r", encoding="utf-8") as f:
+            return json.load(f).get("rules", [])
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"\033[93m[权限] permissions.json 解析失败（{e}），本次按空规则表处理\033[0m")
+        return []
+
+
+def _check_permission(command: str) -> str:
+    """评估命令的权限裁决：deny（规则禁止）/ allow（免确认）/ ask（走人工确认）。"""
+    matched = [
+        rule.get("action")
+        for rule in _load_rules()
+        if rule.get("pattern") and re.search(rule["pattern"], command)
+    ]
+    if "deny" in matched:
+        return "deny"
+    if "allow" in matched:
+        return "allow"
+    return "ask"
 
 
 def _confirm(command: str) -> bool:
@@ -131,6 +151,7 @@ def _confirm(command: str) -> bool:
     """
     is_dangerous = any(p in command for p in DANGEROUS_PATTERNS)
     return confirm(command, dangerous=is_dangerous)
+
 
 
 @tool(
@@ -153,13 +174,16 @@ def _confirm(command: str) -> bool:
 def run_bash(command: str, timeout: int = 30) -> str:
     """在项目根目录执行 bash 命令，返回 exit code + stdout/stderr。
 
-    安全模型：只读白名单免确认，其余命令需用户确认，危险关键词高亮提醒。
-    注意 cwd=PROJECT_ROOT 只缩小误伤半径，并非沙箱——绝对路径访问不受限，
-    人工确认是最后一道防线。
+    安全模型：permissions.json 规则裁决（deny 禁止 / allow 免确认 / ask 人工确认），
+    危险关键词在确认环节高亮提醒。注意 cwd=PROJECT_ROOT 只缩小误伤半径，
+    并非沙箱——绝对路径访问不受限，人工确认是最后一道防线。
     """
     timeout = max(1, min(int(timeout), MAX_TIMEOUT))  # 钳制在 [1, MAX_TIMEOUT]
 
-    if not _is_safe(command) and not _confirm(command):
+    verdict = _check_permission(command)
+    if verdict == "deny":
+        return "该命令被权限规则禁止执行（permissions.json 中为 deny）"
+    if verdict == "ask" and not _confirm(command):
         return "用户拒绝了该命令的执行"
 
     try:
@@ -202,7 +226,9 @@ def _render_todos(todos: list[dict]) -> str:
 
 @tool(
     "todo_write",
-    "Create and manage a task list for your current coding session.",
+    "Create and manage a task list for the current coding session. Use it for tasks "
+    "with 3+ steps, multi-file changes, or ambiguous requests; skip it for single-step "
+    "questions. Each call REPLACES the entire list; update statuses as work progresses.",
     {
         "todos": {
             "type": "array",

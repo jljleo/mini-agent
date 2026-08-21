@@ -1,0 +1,8 @@
+{
+  "rules": [
+    {"pattern": "rm -rf", "action": "deny", "note": "递归删除永不放行"},
+    {"pattern": "^(ls|pwd|cat|echo|grep|find|head|tail|wc|date)(\\s|$)", "action": "allow", "note": "只读基础命令（原 SAFE_PREFIXES，已加词边界防 lsof 类误匹配）"},
+    {"pattern": "^git (status|log|diff|show|branch)(\\s|$)", "action": "allow", "note": "只读 git 命令（原 SAFE_PREFIXES）"},
+    {"pattern": "curl .*wttr\\.in", "action": "allow", "note": "天气服务免确认"}
+  ]
+}
