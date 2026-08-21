@@ -12,6 +12,7 @@ from compact import detect_slim_targets, apply_slimming, estimate_total_tokens, 
     summarize_middle, extract_middle, apply_truncation, current_chars_per_token
 from config import QUIT_COMMANDS, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
+from tools import _clear_todo_file
 
 _BOLD_CYAN = "\033[1;36m"
 _GRAY = "\033[90m"
@@ -47,6 +48,7 @@ def cmd_clear(session: ChatSession):
     # token 计数器一并归零：/clear 语义是"全新会话"，累计消耗不应跨会话保留
     session.total_prompt_tokens = 0
     session.total_completion_tokens = 0
+    _clear_todo_file()
     print("会话已清空")
 
 

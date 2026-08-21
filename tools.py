@@ -4,7 +4,7 @@
 免人工确认；run_bash 为通用接口：白名单免确认 + 其余人工审批。
 两者并存——文件操作走窄接口，真正的命令走 bash。
 """
-
+import json
 import os
 import subprocess
 
@@ -94,7 +94,8 @@ def edit_file(path: str, old: str, new: str) -> str:
     preview = old if len(old) <= 50 else old[:50] + "..."
     count = content.count(old)
     if count == 0:
-        raise ValueError(f"Old text '{preview}' not found in {path}; please read_file first to check the current content")
+        raise ValueError(
+            f"Old text '{preview}' not found in {path}; please read_file first to check the current content")
     if count > 1:
         raise ValueError(f"Old text '{preview}' found {count} times in {path}; provide more context to make it unique")
 
@@ -183,3 +184,72 @@ def run_bash(command: str, timeout: int = 30) -> str:
         output = output[:MAX_OUTPUT_LEN] + "\n... [输出过长，已截断]"
 
     return f"[exit code: {result.returncode}]\n{output}"
+
+
+@tool(
+    "todo_write",
+    "Create and manage a task list for your current coding session.",
+    {
+        "todos": {
+            "type": "array",
+            "description": "List of tasks for the current coding session.",
+            "maxItems": 20,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The content of the task.",
+                        "maxLength": 100,
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "The status of the task.",
+                        "enum": ["pending", "in_progress", "completed"],
+                    }
+                },
+                "required": ["content", "status"]
+            }
+        }
+    },
+    ["todos"],
+)
+def todo_write(todos: list[dict]) -> str:
+    """创建和管理当前编码会话的任务列表。
+
+    任务列表最多包含 20 个任务，每个任务包括内容和状态。
+    """
+    # 将任务列表保存到本地文件
+    todo_file_path = os.path.join(PROJECT_ROOT, "session_todos.json")
+    with open(todo_file_path, "w", encoding="utf-8") as f:
+        json.dump(todos, f, ensure_ascii=False, indent=4)
+
+    return f"已保存 {len(todos)} 个任务到 {todo_file_path}"
+
+
+@tool(
+    "todo_read",
+    "Read the current coding session's task list.",
+    {
+        "description": "Read the current coding session's task list.",
+    },
+)
+def todo_read() -> list[dict]:
+    """读取当前编码会话的任务列表。
+
+    如果任务列表文件不存在，则返回空列表。
+    """
+    todo_file_path = os.path.join(PROJECT_ROOT, "session_todos.json")
+    if not os.path.exists(todo_file_path):
+        return []
+
+    with open(todo_file_path, "r", encoding="utf-8") as f:
+        todos = json.load(f)
+
+    return todos
+
+def _clear_todo_file() -> None:
+    """清空当前编码会话的任务列表文件。"""
+    todo_file_path = os.path.join(PROJECT_ROOT, "session_todos.json")
+    if os.path.exists(todo_file_path):
+        os.remove(todo_file_path)
