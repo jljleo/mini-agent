@@ -186,6 +186,20 @@ def run_bash(command: str, timeout: int = 30) -> str:
     return f"[exit code: {result.returncode}]\n{output}"
 
 
+TODO_FILE = os.path.join(PROJECT_ROOT, "session_todos.json")
+TODO_STATUSES = ("pending", "in_progress", "completed")
+_STATUS_ICONS = {"pending": "○", "in_progress": "▶", "completed": "✓"}
+
+
+def _render_todos(todos: list[dict]) -> str:
+    """把任务清单渲染为文本行（模型读着比 Python repr 友好）。"""
+    if not todos:
+        return "（当前没有任务清单）"
+    return "\n".join(
+        f"{_STATUS_ICONS.get(t['status'], '?')} [{t['status']}] {t['content']}" for t in todos
+    )
+
+
 @tool(
     "todo_write",
     "Create and manage a task list for your current coding session.",
@@ -219,37 +233,33 @@ def todo_write(todos: list[dict]) -> str:
 
     任务列表最多包含 20 个任务，每个任务包括内容和状态。
     """
-    # 将任务列表保存到本地文件
-    todo_file_path = os.path.join(PROJECT_ROOT, "session_todos.json")
-    with open(todo_file_path, "w", encoding="utf-8") as f:
+    # 防御：模型可能写出枚举外的状态（平台校验不严时），兜底为 pending
+    for t in todos:
+        if t.get("status") not in TODO_STATUSES:
+            t["status"] = "pending"
+
+    with open(TODO_FILE, "w", encoding="utf-8") as f:
         json.dump(todos, f, ensure_ascii=False, indent=4)
 
-    return f"已保存 {len(todos)} 个任务到 {todo_file_path}"
+    # 回显清单：模型写完能自我校对；不泄漏绝对路径
+    return f"已保存 {len(todos)} 个任务：\n" + _render_todos(todos)
 
 
 @tool(
     "todo_read",
     "Read the current coding session's task list.",
-    {
-        "description": "Read the current coding session's task list.",
-    },
+    {},
 )
-def todo_read() -> list[dict]:
-    """读取当前编码会话的任务列表。
-
-    如果任务列表文件不存在，则返回空列表。
-    """
-    todo_file_path = os.path.join(PROJECT_ROOT, "session_todos.json")
-    if not os.path.exists(todo_file_path):
-        return []
-
-    with open(todo_file_path, "r", encoding="utf-8") as f:
+def todo_read() -> str:
+    """读取当前编码会话的任务列表。文件不存在时返回空清单提示。"""
+    if not os.path.exists(TODO_FILE):
+        return "（当前没有任务清单）"
+    with open(TODO_FILE, "r", encoding="utf-8") as f:
         todos = json.load(f)
+    return _render_todos(todos)
 
-    return todos
 
-def _clear_todo_file() -> None:
-    """清空当前编码会话的任务列表文件。"""
-    todo_file_path = os.path.join(PROJECT_ROOT, "session_todos.json")
-    if os.path.exists(todo_file_path):
-        os.remove(todo_file_path)
+def clear_todo_file() -> None:
+    """清空当前编码会话的任务列表文件（/clear 时由 commands 调用）。"""
+    if os.path.exists(TODO_FILE):
+        os.remove(TODO_FILE)
