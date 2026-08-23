@@ -305,6 +305,7 @@ def set_history_provider(fn) -> None:
         },
     },
     ["keyword"],
+    resident=False,
 )
 def search_history(keyword: str, context_chars: int = 200) -> str:
     """全文检索会话存储，返回命中片段（含消息下标与角色）。
@@ -393,6 +394,7 @@ def _render_todos(todos: list[dict]) -> str:
         }
     },
     ["todos"],
+    resident=False,
 )
 def todo_write(todos: list[dict]) -> str:
     """创建和管理当前编码会话的任务列表。
@@ -415,6 +417,7 @@ def todo_write(todos: list[dict]) -> str:
     "todo_read",
     "Read the current coding session's task list.",
     {},
+    resident=False,
 )
 def todo_read() -> str:
     """读取当前编码会话的任务列表。文件不存在时返回空清单提示。"""

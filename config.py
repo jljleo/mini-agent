@@ -77,19 +77,19 @@ SYSTEM_MESSAGES = [
     },
     {
         "role": "system",
-        "content": "如果有的问题你没法回答,你可以使用search_tools查看有没有可以帮助你的",
+        "content": "文件读写、run_bash 等基础工具已直接声明可用；todo 清单、search_history 历史检索等工具用 search_tools 检索后即可调用。",
     },
     {
         "role": "system",
         # 平台 bug 规避：kimi-k3 上回传 $web_search 结果必现 400 tokenization failed（官方论坛已报未修），
         # 且模型可能自发调用它，故明确禁用；联网需求引导走 run_bash + curl（需用户确认）。
         # 平台修复后：删除此条禁用句，并在 agent.BASE_TOOLS 加回 WEB_SEARCH_SCHEMA。
-        "content": "不要调用 $web_search（该内置功能当前不可用）。当你需要联网获取实时信息（如天气、新闻、汇率）时，改用 run_bash 工具执行 curl 命令获取（例如 curl 天气服务 wttr.in、各类公开 API）；注意这属于需要用户确认的命令，执行前向用户说明你要访问的地址。除此之外，当你无法直接回答时，先用 search_tools 查看可用工具，再调用合适的工具来回答用户（例如用 run_bash 执行 date 命令获取当前时间）。",
+        "content": "不要调用 $web_search（该内置功能当前不可用）。当你需要联网获取实时信息（如天气、新闻、汇率）时，改用 run_bash 工具执行 curl 命令获取（例如 curl 天气服务 wttr.in、各类公开 API）；注意这属于需要用户确认的命令，执行前向用户说明你要访问的地址。当你无法直接回答时，直接调用已声明的工具（例如用 run_bash 执行 date 命令获取当前时间）；现有工具都不够用时才用 search_tools 查找额外工具。",
     },
     {
         "role": "system",
         "content": (
-            "任务规划规则：\n"
+            "任务规划规则（todo_write/todo_read 需先经 search_tools 检索发现后调用）：\n"
             "1. 满足以下任一条件，先用 todo_write 建清单再动手：步骤 ≥3、涉及多个文件、需求模糊需要拆解。\n"
             "2. 清单全量覆盖：每次 todo_write 传入完整列表，逐项更新状态（pending → in_progress → completed），"
             "开始某步前标 in_progress，完成立即标 completed。\n"

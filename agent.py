@@ -39,15 +39,16 @@ from compact import (
     extract_middle,
     summarize_middle,
 )
-from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas
+from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas, get_extended_tool_schemas
 from streaming import stream_and_assemble
 from tools import set_history_provider
 
-# 顶层请求常驻的工具：search_tools（动态发现入口）
-# NOTE: $web_search（WEB_SEARCH_SCHEMA）暂不常驻——Moonshot 平台 bug：
+# 常驻请求的工具声明：search_tools（发现入口，面向未来扩展工具如 MCP）+
+# 全部 resident 业务工具（8 个才 ~2.4K tokens，缓存全命中近乎免费）。
+# 可发现工具（resident=False）不常驻，由 search_tools 检索后注入。
+# NOTE: $web_search（WEB_SEARCH_SCHEMA）暂不接入——Moonshot 平台 bug：
 # kimi-k3 上回传 builtin_function 工具结果必现 400 tokenization failed
-# （官方论坛 2026-07-23 已报，未修；kimi-k2.6 正常但 k2.6 不支持动态工具注入机制）。
-# 接入代码（agent._execute_tool_call 的 echo 逻辑）已就绪，平台修复后加回 BASE_TOOLS 即可。
+# （官方论坛 2026-07-23 已报，未修）。平台修复后直接加进 tools= 声明即可。
 BASE_TOOLS = [SEARCH_TOOLS_SCHEMA]
 
 def load_saved_session() -> dict | None:
@@ -184,7 +185,7 @@ class ChatSession:
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
                     # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
                     messages=payload,
-                    tools=BASE_TOOLS,
+                    tools=BASE_TOOLS + get_all_tool_schemas(),  # 发现入口 + 全部常驻工具
                     stream=True,
                     stream_options={"include_usage": True}
                 )
@@ -249,10 +250,12 @@ class ChatSession:
                         }
                     )
 
-                    # search_tools 被调用后，注入完整工具声明（Moonshot 动态加载机制），幂等
-                    if name == "search_tools" and not self._tools_already_injected():
+                    # search_tools 被调用后，注入可发现工具声明（Moonshot 动态加载机制），幂等。
+                    # 当前没有可发现工具时不注入（空声明消息只会白占上下文）
+                    if (name == "search_tools" and get_extended_tool_schemas()
+                            and not self._tools_already_injected()):
                         self.messages.append(
-                            {"role": "system", "tools": get_all_tool_schemas()}
+                            {"role": "system", "tools": get_extended_tool_schemas()}
                         )
         else:
             ui.warn(f"工具调用超过 {MAX_TOOL_ROUNDS} 轮，已强制结束本轮对话")

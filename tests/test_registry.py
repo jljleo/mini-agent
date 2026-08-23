@@ -38,14 +38,54 @@ class TestToolRegistry:
         assert f.tool_schema["function"]["parameters"]["required"] == []
 
     def test_get_all_excludes_search_tools(self, clean_tools):
-        """search_tools 常驻顶层请求，聚合时必须排除（否则 duplicate tool name 400）。"""
+        """search_tools 的声明由 SEARCH_TOOLS_SCHEMA 常驻，不参与聚合（防自我引用）。"""
         names = [s["function"]["name"] for s in get_all_tool_schemas()]
         assert "search_tools" not in names
 
-    def test_search_tools_executable_returns_json(self):
-        result = TOOLS["search_tools"]()
-        names = [s["function"]["name"] for s in json.loads(result)]
-        assert "read_file" in names  # 业务工具在列
+    def test_resident_default_true(self, clean_tools):
+        """默认常驻：8 个基本工具直接进 tools= 参数，无需先检索。"""
+        @tool("demo_resident", "演示", {})
+        def f():
+            return "ok"
+
+        assert f.tool_resident is True
+        names = [s["function"]["name"] for s in get_all_tool_schemas()]
+        assert "demo_resident" in names
+
+    def test_extended_split(self, clean_tools):
+        """resident=False 进可发现档：不常驻 tools=，由 search_tools 检索后注入。"""
+        @tool("demo_extended", "演示", {}, resident=False)
+        def f():
+            return "ok"
+
+        resident_names = [s["function"]["name"] for s in get_all_tool_schemas()]
+        extended_names = [s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()]
+        assert "demo_extended" not in resident_names
+        assert "demo_extended" in extended_names
+
+    def test_search_tools_empty_extended_gives_guidance(self, clean_tools):
+        """没有可发现工具时返回明确指引而非空列表（空列表会让模型以为检索失败）。"""
+        # 真实注册表常驻 3 个可发现工具（search_history/todo × 2），先移除模拟空档
+        for name in ("search_history", "todo_write", "todo_read"):
+            TOOLS.pop(name)
+        assert "没有额外的可发现工具" in TOOLS["search_tools"]()
+
+    def test_search_tools_returns_only_extended(self, clean_tools):
+        """核心互斥：search_tools 绝不能返回常驻工具（常驻 + 注入 = duplicate 400）。"""
+        @tool("demo_extended2", "演示", {}, resident=False)
+        def f():
+            return "ok"
+
+        names = {s["function"]["name"] for s in json.loads(TOOLS["search_tools"]())}
+        assert names == {"search_history", "todo_write", "todo_read", "demo_extended2"}
+        assert "read_file" not in names  # 常驻四件套绝不在可发现档
+
+    def test_core_four_resident_others_discoverable(self):
+        """分档契约：read/write/edit_file + run_bash 常驻，其余走 search_tools 发现。"""
+        resident = {s["function"]["name"] for s in get_all_tool_schemas()}
+        extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
+        assert resident == {"read_file", "write_file", "edit_file", "run_bash"}
+        assert extended == {"search_history", "todo_write", "todo_read"}
 
     def test_business_tools_registered(self):
         """导入 tools 后核心业务工具全部注册（防装饰器被误删）。"""

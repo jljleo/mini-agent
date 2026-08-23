@@ -100,9 +100,9 @@ def _make_placeholder(messages: list[dict], index: int) -> str:
     args_echo = _find_args_echo(messages, index)
     if name == "run_bash":
         # bash 结果可能是 curl 联网快照等不可再生观测，重跑拿到的是最新状态而非原文
-        hint = "可重跑该命令获取最新结果（原结果为历史快照），或用 search_history 检索原文"
+        hint = "可重跑该命令获取最新结果（原结果为历史快照），或经 search_tools 发现 search_history 后检索原文"
     else:
-        hint = f"如需内容，可重新调用 {name} 获取，或用 search_history 检索原文"
+        hint = f"如需内容，可重新调用 {name} 获取，或经 search_tools 发现 search_history 后检索原文"
     return f"[历史工具结果已瘦身] {name}{args_echo}，原 {original_len} 字符。{hint}。"
 
 
@@ -130,7 +130,7 @@ def apply_message_cap(messages: list[dict], cap: int = SINGLE_MSG_CAP_CHARS) -> 
         omitted = len(content) - head - tail
         out[i] = {**m, "content": (
             content[:head]
-            + f"\n...[中间省略 {omitted} 字符，可用 search_history 检索完整内容]...\n"
+            + f"\n...[中间省略 {omitted} 字符，可经 search_tools 发现 search_history 后检索完整内容]...\n"
             + content[-tail:]
         )}
     return out if out is not None else messages
@@ -165,8 +165,9 @@ def calibrate(real_tokens: int, messages: list[dict]) -> None:
 # ---- L1 截断 ----
 
 # 截断后在拼接处插入的标记：让模型知道历史被切过，而不是对话本来就这么多；
-# 附 search_history 指引——被切部分在存储里完好，模型可自助回查（可兑现的恢复承诺）
-_TRUNCATION_MARKER = {"role": "system", "content": "[早期对话历史已截断，仅保留近期内容；如需被截断部分的细节，可用 search_history 工具检索]"}
+# 附恢复指引——被切部分在存储里完好。search_history 是可发现工具（resident=False），
+# 指引需走两跳：先 search_tools 发现，再调用检索（承诺必须可兑现）
+_TRUNCATION_MARKER = {"role": "system", "content": "[早期对话历史已截断，仅保留近期内容；如需被截断部分的细节，可经 search_tools 发现 search_history 后检索]"}
 
 
 def _count_chars(msg: dict) -> int:
