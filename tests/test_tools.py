@@ -251,6 +251,63 @@ class TestRunBash:
         assert "ok" in result  # 钳制后正常执行（不钳制也只是执行，但此处验证不炸）
 
 
+# ============ 历史检索 ============
+
+class TestSearchHistory:
+    HISTORY = [
+        {"role": "user", "content": "帮我修复 auth.py 的登录超时 bug"},
+        {"role": "assistant", "content": "已修复 auth.py"},
+        {"role": "tool", "name": "read_file", "tool_call_id": "c1",
+         "content": "原始工具结果包含 TimeoutError 堆栈"},
+    ]
+
+    @pytest.fixture
+    def history(self, monkeypatch):
+        monkeypatch.setattr(tools, "_history_provider", lambda: self.HISTORY)
+
+    def test_finds_keyword_with_location(self, history):
+        out = tools.search_history("auth.py")
+        assert "#0 user" in out and "#1 assistant" in out
+        assert "登录超时" in out
+
+    def test_finds_in_tool_results(self, history):
+        """核心价值：被瘦身的工具结果原文在存储里可检索。"""
+        out = tools.search_history("TimeoutError")
+        assert "#2 tool(read_file)" in out
+
+    def test_case_insensitive(self, history):
+        assert "#2" in tools.search_history("timeouterror")
+
+    def test_no_hit(self, history):
+        assert "未在历史中找到" in tools.search_history("不存在的词xyz")
+
+    def test_provider_not_injected(self, monkeypatch):
+        monkeypatch.setattr(tools, "_history_provider", None)
+        assert "不可用" in tools.search_history("x")
+
+    def test_hit_count_capped(self, monkeypatch):
+        """高频词刷屏防线：命中上限 20。"""
+        monkeypatch.setattr(tools, "_history_provider",
+                            lambda: [{"role": "user", "content": "ab" * 5000}])
+        out = tools.search_history("ab", context_chars=50)
+        assert out.count("[#0") <= 20
+
+    def test_output_truncation(self, monkeypatch):
+        monkeypatch.setattr(tools, "_history_provider",
+                            lambda: [{"role": "user", "content": "k" + "x" * 200_000}] * 5)
+        out = tools.search_history("k", context_chars=500)
+        assert len(out) <= tools.MAX_OUTPUT_LEN + 100  # 截断标记的余量
+
+    def test_empty_keyword_rejected(self, history):
+        assert "不能为空" in tools.search_history("")
+
+    def test_session_injects_provider(self, session):
+        """集成：ChatSession 构造即注入数据源，检索的就是 self.messages。"""
+        session.messages.append({"role": "user", "content": "独特标记-xyz123"})
+        # session fixture 的 ChatSession 构造时已完成注入
+        assert "独特标记-xyz123" in tools.search_history("xyz123")
+
+
 # ============ todo 工具 ============
 
 class TestTodo:

@@ -29,6 +29,7 @@ from config import (
     TRUNCATE_LOW_TOKENS,
 )
 from compact import (
+    apply_message_cap,
     apply_slimming,
     apply_truncation,
     calibrate,
@@ -40,6 +41,7 @@ from compact import (
 )
 from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas
 from streaming import stream_and_assemble
+from tools import set_history_provider
 
 # 顶层请求常驻的工具：search_tools（动态发现入口）
 # NOTE: $web_search（WEB_SEARCH_SCHEMA）暂不常驻——Moonshot 平台 bug：
@@ -67,6 +69,8 @@ class ChatSession:
         self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
+        # 历史检索工具的数据源：存储（而非投影）——被瘦身/截断/摘要/截中的原文都可检索
+        set_history_provider(lambda: self.messages)
         # token 仪表盘：会话累计消耗
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
@@ -133,13 +137,13 @@ class ChatSession:
         """一轮提问：append → 请求 → 流式 → 工具循环，直到模型给出终稿。"""
         self.messages.append({"role": "user", "content": user_input})
 
-        # 历史管理管道（轮边界检测一次）：先 L3 瘦身，瘦身后估算仍超硬水位才 L1 截断
+        # 历史管理管道（轮边界检测一次）：先 L3 瘦身 + 单条体积上限（均不改消息数量，
+        # 下标与原始历史对齐），瘦身后估算仍超硬水位才 L1 截断
         slim_targets = detect_slim_targets(self.messages)
         if slim_targets:
             ui.note(f"已瘦身 {len(slim_targets)} 条超龄工具结果", tag="compact")
-        # 切点计算也基于瘦身后的投影：占位符只有 ~100 字符，按原始体积装箱会误多切；
-        # 瘦身不改消息数量与顺序，下标与原始历史完全对齐，投影可直接复用
-        slimmed = apply_slimming(self.messages, slim_targets)
+        # 切点计算也基于瘦身后的投影：占位符只有 ~100 字符，按原始体积装箱会误多切
+        slimmed = apply_message_cap(apply_slimming(self.messages, slim_targets))
         cut = 0
         note = None
         if estimate_total_tokens(slimmed) >= TRUNCATE_HIGH_TOKENS:
@@ -161,13 +165,16 @@ class ChatSession:
         for _ in range(MAX_TOOL_ROUNDS):
             # 每轮重算投影：工具循环内历史只涨不停（单轮最多 30 次调用×10K 字符），
             # 轮边界的检测看不见"单轮爆炸"，超线时应急升级截断（L1 硬切，不插 L2 调用）
-            payload = apply_truncation(apply_slimming(self.messages, slim_targets), cut, note)
+            # 瘦身与体积上限均不改消息数量与顺序，cut 下标对投影同样有效
+            def project(msgs):
+                return apply_message_cap(apply_slimming(msgs, slim_targets))
+
+            payload = apply_truncation(project(self.messages), cut, note)
             if estimate_total_tokens(payload) >= TRUNCATE_HIGH_TOKENS:
-                escalated = detect_truncation_point(
-                    apply_slimming(self.messages, slim_targets), TRUNCATE_LOW_TOKENS)
+                escalated = detect_truncation_point(project(self.messages), TRUNCATE_LOW_TOKENS)
                 if escalated > cut:
                     cut, note = escalated, None
-                    payload = apply_truncation(apply_slimming(self.messages, slim_targets), cut, note)
+                    payload = apply_truncation(project(self.messages), cut, note)
                     ui.note("工具循环内上下文超限，已应急截断（L1）", tag="compact")
 
             # StreamRenderer：spinner 等首字 → 思考暗色预览 → 正文 Markdown 流式渲染

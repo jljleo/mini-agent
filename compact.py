@@ -1,8 +1,10 @@
-"""历史管理：L3 工具结果瘦身 + L1 历史截断，均为发送时投影，存储不动。
+"""历史管理：L3 工具结果瘦身 + 单条体积上限 + L1 历史截断，均为发送时投影，存储不动。
 
 执行顺序（重要）：先 L3 瘦身（无损、便宜），瘦身后估算仍超硬水位才 L1 截断（有损、兜底）。
 
 - detect_slim_targets / apply_slimming：超龄 tool 消息换占位符（带恢复线索）
+- apply_message_cap：单条消息体积上限（中段截断保首尾）——补上 MAX_OUTPUT_LEN
+  没盖住的那半边：user 输入无天然上限，首条 user 超大会让保留区自身爆窗
 - detect_truncation_point：反向装箱算截断点——从尾部往回装，装满低水位就停，
   再吸附到安全边界（不制造孤儿 tool 消息），O(n) 一趟无试错
 - apply_truncation：头部保留区（system 模板 + 动态注入的 tools 声明）+ 截断标记 + 尾部
@@ -15,6 +17,7 @@ import json
 import ui
 from config import (
     MODEL,
+    SINGLE_MSG_CAP_CHARS,
     SLIM_MIN_SAVINGS_CHARS,
     SLIM_TRIGGER_CHARS,
     SUMMARIZE_MAX_CHARS,
@@ -97,10 +100,40 @@ def _make_placeholder(messages: list[dict], index: int) -> str:
     args_echo = _find_args_echo(messages, index)
     if name == "run_bash":
         # bash 结果可能是 curl 联网快照等不可再生观测，重跑拿到的是最新状态而非原文
-        hint = "可重跑该命令获取最新结果（原结果为历史快照）"
+        hint = "可重跑该命令获取最新结果（原结果为历史快照），或用 search_history 检索原文"
     else:
-        hint = f"如需内容，可重新调用 {name} 获取"
+        hint = f"如需内容，可重新调用 {name} 获取，或用 search_history 检索原文"
     return f"[历史工具结果已瘦身] {name}{args_echo}，原 {original_len} 字符。{hint}。"
+
+
+# ---- 单条体积上限 ----
+
+
+def apply_message_cap(messages: list[dict], cap: int = SINGLE_MSG_CAP_CHARS) -> list[dict]:
+    """单条消息体积上限（投影）：content 超 cap 时中段截断保首尾，存储不动。
+
+    分层防御的“单条体积”层。MAX_OUTPUT_LEN 只盖住工具产出，user 输入无天然上限：
+    首条 user 超大会让保留区自身爆窗（它无条件保留，会话永久报废，只能 /clear）；
+    末条 user 超大会让 L1 兜底失效（保留尾部本身超窗口，API 必 400）。
+    对全 role 一视同仁：位置语义（保留区/尾部）由截断层管，这层只管体积。
+    保首尾的依据：任务目标在开头、最新补充在结尾，中段截断损失最小。
+    """
+    out = None
+    for i, m in enumerate(messages):
+        content = str(m.get("content") or "")
+        if len(content) <= cap:
+            continue
+        if out is None:
+            out = list(messages)  # 惰性拷贝：无超标消息时恒等返回原列表（零打扰）
+        head = cap // 2
+        tail = cap - head
+        omitted = len(content) - head - tail
+        out[i] = {**m, "content": (
+            content[:head]
+            + f"\n...[中间省略 {omitted} 字符，可用 search_history 检索完整内容]...\n"
+            + content[-tail:]
+        )}
+    return out if out is not None else messages
 
 
 # ---- token 估算 ----
@@ -131,8 +164,9 @@ def calibrate(real_tokens: int, messages: list[dict]) -> None:
 
 # ---- L1 截断 ----
 
-# 截断后在拼接处插入的标记：让模型知道历史被切过，而不是对话本来就这么多
-_TRUNCATION_MARKER = {"role": "system", "content": "[早期对话历史已截断，仅保留近期内容]"}
+# 截断后在拼接处插入的标记：让模型知道历史被切过，而不是对话本来就这么多；
+# 附 search_history 指引——被切部分在存储里完好，模型可自助回查（可兑现的恢复承诺）
+_TRUNCATION_MARKER = {"role": "system", "content": "[早期对话历史已截断，仅保留近期内容；如需被截断部分的细节，可用 search_history 工具检索]"}
 
 
 def _count_chars(msg: dict) -> int:

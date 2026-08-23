@@ -298,6 +298,53 @@ class TestSummarize:
         assert len(sent) < len(json.dumps(middle, ensure_ascii=False))
 
 
+# ============ 单条体积上限 ============
+
+class TestApplyMessageCap:
+    def test_under_cap_identity(self):
+        """无超标消息时恒等返回原列表（零打扰，保 prompt cache）。"""
+        msgs = [user("正常"), asst("正常")]
+        assert compact.apply_message_cap(msgs) is msgs
+
+    def test_oversized_middle_truncated_storage_untouched(self):
+        big = "头" * 100 + "中" * 100_000 + "尾" * 100
+        msgs = [user(big)]
+        out = compact.apply_message_cap(msgs, cap=60_000)
+        content = out[0]["content"]
+        assert content.startswith("头" * 100)
+        assert content.endswith("尾" * 100)
+        assert "中间省略" in content and "search_history" in content
+        assert len(content) < 61_000
+        assert msgs[0]["content"] == big  # 存储一个字节不动
+
+    def test_uniform_across_roles(self):
+        """对全 role 一视同仁：体积层不管位置语义。"""
+        big = "x" * 100_000
+        msgs = [user(big), asst(big), tool_msg(content=big)]
+        out = compact.apply_message_cap(msgs, cap=60_000)
+        assert all("中间省略" in m["content"] for m in out)
+        assert len(out) == len(msgs)  # 不改消息数量，下标对齐（投影可复用）
+
+    def test_huge_first_user_no_longer_bricks_session(self):
+        """回归：首条 user 超大曾让保留区自身爆窗（每轮必 400，只能 /clear）。"""
+        msgs = [{"role": "system", "content": "s"},
+                user("z" * 300_000), asst("首次回应")]
+        msgs += [user("后续"), asst("回应")]
+        capped = compact.apply_message_cap(msgs)
+        cut = detect_truncation_point(capped, 60_000)
+        payload = apply_truncation(capped, cut)
+        assert compact.estimate_total_tokens(payload) < 128_000
+
+    def test_huge_last_user_fallback_now_survivable(self):
+        """回归：末条 user 超大曾让 L1 兜底保留的尾部本身超窗口。"""
+        msgs = [{"role": "system", "content": "s"}, user("最初任务"), asst("首次回应")]
+        msgs += [user("z" * 300_000)]
+        capped = compact.apply_message_cap(msgs)
+        cut = detect_truncation_point(capped, 60_000)
+        payload = apply_truncation(capped, cut)
+        assert compact.estimate_total_tokens(payload) < 128_000
+
+
 # ============ 中段提取 ============
 
 class TestExtractMiddle:

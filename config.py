@@ -50,6 +50,12 @@ SLIM_MIN_SAVINGS_CHARS = 2_000
 TRUNCATE_HIGH_TOKENS = 100_000  # 硬触发线（kimi-k3 128K 窗口预留输出与余量）
 TRUNCATE_LOW_TOKENS = 60_000  # 截断目标：切完留下足够增长空间
 
+# --- 单条体积上限（compact.py，投影级）---
+# 分层防御的“单条体积”层：MAX_OUTPUT_LEN 只管工具产出，user 输入无天然上限——
+# 首条 user 超大会让保留区自身爆窗（会话永久报废），末条 user 超大会让 L1 兜底失效。
+# 60K 字符 ≈ 30K tokens：即使首条+末条同时超大，两者合计仍远低于 128K 窗口。
+SINGLE_MSG_CAP_CHARS = 60_000
+
 # --- L2 摘要（compact.py，L1 的保值版）---
 # 触发与 L1 同高水位：到线后先尝试让模型压缩中段，失败再回退硬切。
 SUMMARIZE_MAX_CHARS = 150_000  # 摘要输入上限：中段超长时只取靠后部分（更贴近当前任务）

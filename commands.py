@@ -12,7 +12,7 @@ from rich.table import Table
 import ui
 from agent import ChatSession, load_saved_session
 from command_registry import command, COMMANDS
-from compact import detect_slim_targets, apply_slimming, estimate_total_tokens, detect_truncation_point, \
+from compact import apply_message_cap, detect_slim_targets, apply_slimming, estimate_total_tokens, detect_truncation_point, \
     summarize_middle, extract_middle, apply_truncation, current_chars_per_token
 from config import QUIT_COMMANDS, SESSION_FILE, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
@@ -91,10 +91,10 @@ def cmd_resume(session: ChatSession, args: str = ""):
 def cmd_compact(session: ChatSession, args: str = ""):
     # 手动压缩语义：用户下令即执行，不受自动水位线限制——直接向 LOW 水位切；
     # 瘦身的触发/收益门槛同理跳过（trigger_chars=0, min_savings=0）
-    slimmed = apply_slimming(
+    slimmed = apply_message_cap(apply_slimming(
         session.messages,
         detect_slim_targets(session.messages, trigger_chars=0, min_savings=0),
-    )
+    ))
     before = estimate_total_tokens(slimmed)
     cut = detect_truncation_point(slimmed, TRUNCATE_LOW_TOKENS)
     if not cut:

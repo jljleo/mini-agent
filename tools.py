@@ -275,6 +275,81 @@ def run_bash(command: str, timeout: int = 30) -> str:
     return f"[exit code: {result.returncode}]\n{output}"
 
 
+# ---------- 历史检索：统一兑现三层上下文管理的“可恢复”承诺 ----------
+
+# 数据源由 ChatSession 构造时注入（工具函数无状态，历史由会话持有）
+_history_provider = None
+
+
+def set_history_provider(fn) -> None:
+    """注入历史数据源（返回 messages 列表的可调用对象）。"""
+    global _history_provider
+    _history_provider = fn
+
+
+@tool(
+    "search_history",
+    "Search the FULL session history (storage), including content no longer visible in "
+    "your context: slimmed tool results, truncated early history, summarized sections, "
+    "and the omitted middle of oversized messages. Use when a placeholder/marker says "
+    "content was removed, or when a summary seems incomplete. Returns matching snippets "
+    "with surrounding context; prefer specific keywords (file paths, error messages).",
+    {
+        "keyword": {
+            "type": "string",
+            "description": "The substring to search for (case-insensitive). Use specific strings like file paths or error messages, not generic words.",
+        },
+        "context_chars": {
+            "type": "integer",
+            "description": "Characters of context to show around each hit (default 200, max 500).",
+        },
+    },
+    ["keyword"],
+)
+def search_history(keyword: str, context_chars: int = 200) -> str:
+    """全文检索会话存储，返回命中片段（含消息下标与角色）。
+
+    设计要点：
+    - 检索对象是存储（self.messages）而非投影——被瘦身/截断/摘要/截中的原文都在；
+    - 返回片段而非全文：膨胀天然有界，且结果以 tool 消息身份进上下文，被 L3 回收；
+    - 一个工具覆盖三层降级（L1/L2/L3/单条上限），不给每层各铺一条恢复管道。
+    """
+    if _history_provider is None:
+        return "（历史检索不可用：数据源未注入）"
+    context_chars = max(50, min(int(context_chars), 500))
+    needle = keyword.lower()
+    if not needle:
+        return "（关键词不能为空）"
+
+    hits = []
+    for i, m in enumerate(_history_provider()):
+        content = str(m.get("content") or "")
+        lowered = content.lower()
+        pos = 0
+        while len(hits) < 20:  # 命中上限：防高频词刷屏
+            pos = lowered.find(needle, pos)
+            if pos < 0:
+                break
+            start = max(0, pos - context_chars)
+            end = min(len(content), pos + len(keyword) + context_chars)
+            snippet = content[start:end].replace("\n", " ")
+            role = m.get("role")
+            name = f"({m['name']})" if m.get("name") else ""
+            hits.append(f"[#{i} {role}{name}] …{snippet}…")
+            pos = end
+        if len(hits) >= 20:
+            break
+
+    if not hits:
+        return f"（未在历史中找到 {keyword!r}）"
+    out = f"命中 {len(hits)} 处：\n" + "\n".join(hits)
+    if len(out) > MAX_OUTPUT_LEN:
+        out = out[:MAX_OUTPUT_LEN] + "\n... [结果过长，已截断；换更精确的关键词]"
+    return out
+
+
+# ---------- todo 工具 ----------
+
 TODO_FILE = os.path.join(PROJECT_ROOT, "session_todos.json")
 TODO_STATUSES = ("pending", "in_progress", "completed")
 _STATUS_ICONS = {"pending": "○", "in_progress": "▶", "completed": "✓"}
