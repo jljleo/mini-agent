@@ -1,7 +1,8 @@
 """业务工具实现：用 @tool 装饰器注册到 registry。
 
-文件工具（read_file/write_file/edit_file）为窄接口：路径围栏代码级强制、
-免人工确认；run_bash 为通用接口：permissions.json 规则裁决 + 人工审批兑底。
+文件工具（read_file/write_file/edit_file）为窄接口：项目内免确认，项目外人工确认
+（围栏内自由、围栏外审批——与权限系统同一思路）；run_bash 为通用接口：
+permissions.json 规则裁决 + 人工审批兜底，且命令中出现项目外路径时 allow 降级为 ask。
 两者并存——文件操作走窄接口，真正的命令走 bash。
 """
 import json
@@ -18,41 +19,80 @@ from tool_registry import tool
 # ---------- 文件窄接口工具：路径围栏 + 免确认 ----------
 
 
-def _resolve_safe_path(path: str) -> str:
-    """把模型给的路径解析为绝对路径，并强制限制在项目目录内（含符号链接防护）。"""
+def _resolve_safe_path(path: str, op: str) -> str:
+    """把模型给的路径解析为绝对路径；项目内直接放行，项目外转人工确认。
+
+    realpath 防符号链接逃逸。早期设计是越界硬拒绝，但模型会绕过：改用 run_bash
+    执行 cat 读外界文件。既然权限系统已有"确认"这一档，围栏外降级为询问用户，
+    比硬拒绝更可用、比放任更安全。拒绝时抛 ValueError，由 agent 统一转为工具结果。
+    """
     full_path = os.path.realpath(os.path.join(PROJECT_ROOT, path))
-    if full_path != PROJECT_ROOT and not full_path.startswith(PROJECT_ROOT + os.sep):
-        raise ValueError("Path must be within the project root.")
+    if full_path == PROJECT_ROOT or full_path.startswith(PROJECT_ROOT + os.sep):
+        return full_path
+    # write/edit 会改外界文件，确认框按危险操作红色高亮；read 只读，普通高亮
+    if not confirm(f"{op} {full_path}", dangerous=(op != "read_file")):
+        raise ValueError(f"用户拒绝了访问项目外路径：{full_path}")
     return full_path
 
 
 @tool(
     "read_file",
-    "Read the content of a file within the project directory.",
+    "Read the content of a file. Paths inside the project directory are read "
+    "directly; absolute paths outside the project require user confirmation. "
+    "The range to read is specified by offset/limit, defaulting to reading the "
+    "first 10K characters. The max limit is 10K. Truncates any excess.",
     {
         "path": {
             "type": "string",
-            "description": "The path to the file, relative to the project root.",
+            "description": "The path to the file, relative to the project root. Absolute paths outside the project are allowed but require user confirmation.",
+        },
+        "offset": {
+            "type": "integer",
+            "description": "The starting character offset to read from (default 0).",
+        },
+        "limit": {
+            "type": "integer",
+            "description": "The maximum number of characters to read (default 10000, max 10000).",
         },
     },
     ["path"],
 )
-def read_file(path: str) -> str:
-    with open(_resolve_safe_path(path), "r", encoding="utf-8") as f:
+def read_file(path: str, offset: int = 0, limit: int = 10000) -> str:
+    """读取文件内容（项目外路径需用户确认），返回字符串。
+    读取范围由 offset/limit 指定，默认从头读 10K 字符；未读完时附续读提示。
+    """
+    if offset < 0 or limit <= 0:
+        raise ValueError("Offset must be non-negative and limit must be positive.")
+    if limit > 10_000:  # 10K 字符上限，防大文件灌爆上下文
+        raise ValueError("Limit must be less than or equal to 10000.")
+    with open(_resolve_safe_path(path, "read_file"), "r", encoding="utf-8") as f:
         content = f.read()
-    # 截断保护：大文件灌爆上下文是 agent 常见死法
-    if len(content) > MAX_OUTPUT_LEN:
-        content = content[:MAX_OUTPUT_LEN] + "\n... [内容过长，已截断]"
-    return content
+    total = len(content)
+    if offset >= total:
+        return f"（offset {offset} 已超出文件末尾，全文共 {total} 字符）"
+    page = content[offset:offset + limit]
+    # 截断保护先于续读提示：hint 是导航信号，不能自己也被截掉
+    # （limit ≤ 10K = MAX_OUTPUT_LEN 时此分支是防御性兜底）
+    if len(page) > MAX_OUTPUT_LEN:
+        page = page[:MAX_OUTPUT_LEN] + "\n... [内容过长，已截断]"
+    # 分页闭环：告诉模型读到哪、还剩多少、下一页怎么翻——没有位置信号的
+    # 分页是半残的（模型无法区分“刚好读满”与“读到末尾”）
+    end = offset + len(page)
+    if end < total:
+        page += f"\n...[未完：全文 {total} 字符，已返回 {offset}~{end}，续读用 offset={end}]"
+    return page
 
 
 @tool(
     "write_file",
-    "Write content to a file within the project directory. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+    "Write content to a file. Paths inside the project directory are written "
+    "directly; absolute paths outside the project require user confirmation. "
+    "Creates the file if it doesn't exist, overwrites if it does. Automatically "
+    "creates parent directories.",
     {
         "path": {
             "type": "string",
-            "description": "The path to the file, relative to the project root.",
+            "description": "The path to the file, relative to the project root. Absolute paths outside the project are allowed but require user confirmation.",
         },
         "content": {
             "type": "string",
@@ -62,7 +102,7 @@ def read_file(path: str) -> str:
     ["path", "content"],
 )
 def write_file(path: str, content: str) -> str:
-    full = _resolve_safe_path(path)
+    full = _resolve_safe_path(path, "write_file")
     os.makedirs(os.path.dirname(full), exist_ok=True)
     with open(full, "w", encoding="utf-8") as f:
         f.write(content)
@@ -71,11 +111,13 @@ def write_file(path: str, content: str) -> str:
 
 @tool(
     "edit_file",
-    "Edit a file by exact text replacement. The old text must appear exactly ONCE in the file; on failure, read_file first to check the current content.",
+    "Edit a file by exact text replacement. Paths outside the project directory "
+    "require user confirmation. The old text must appear exactly ONCE in the file; "
+    "on failure, read_file first to check the current content.",
     {
         "path": {
             "type": "string",
-            "description": "The path to the file, relative to the project root.",
+            "description": "The path to the file, relative to the project root. Absolute paths outside the project are allowed but require user confirmation.",
         },
         "old": {
             "type": "string",
@@ -89,7 +131,7 @@ def write_file(path: str, content: str) -> str:
     ["path", "old", "new"],
 )
 def edit_file(path: str, old: str, new: str) -> str:
-    full = _resolve_safe_path(path)
+    full = _resolve_safe_path(path, "edit_file")
     with open(full, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -154,12 +196,30 @@ def _confirm(command: str) -> bool:
     return confirm(command, dangerous=is_dangerous)
 
 
+def _has_outside_path(command: str) -> bool:
+    """浅层检测命令中是否出现项目外路径（绝对路径 / ~ / .. 开头的 token）。
+
+    背景：allow 规则按命令名匹配（如 cat 免确认），但 `cat /etc/hosts` 会绕过
+    文件工具的路径围栏静默读取项目外内容。shell 语义无法静态穷尽（管道、变量、
+    子 shell、`cd` 后接相对路径），这里是尽力而为的第一道筛子：命中即把 allow
+    降级为 ask，漏检的部分由 allow 规则本身只覆盖只读命令来兜底。
+    """
+    for token in command.split():
+        token = token.strip("'\"")
+        if token.startswith(("/", "~", "..")):
+            full = os.path.realpath(os.path.join(PROJECT_ROOT, os.path.expanduser(token)))
+            if full != PROJECT_ROOT and not full.startswith(PROJECT_ROOT + os.sep):
+                return True
+    return False
+
+
 
 @tool(
     "run_bash",
     "Run a bash command in the project root directory and return stdout/stderr with "
     "exit code. Read-only commands run directly; all other commands require interactive "
-    "user confirmation. Has timeout (max 120s) and output truncation.",
+    "user confirmation, as do commands accessing paths outside the project. "
+    "Has timeout (max 120s) and output truncation.",
     {
         "command": {
             "type": "string",
@@ -182,6 +242,10 @@ def run_bash(command: str, timeout: int = 30) -> str:
     timeout = max(1, min(int(timeout), MAX_TIMEOUT))  # 钳制在 [1, MAX_TIMEOUT]
 
     verdict = _check_permission(command)
+    # allow 授权的是命令本身，不是越界访问：`cat /etc/hosts` 会绕过文件工具的
+    # 路径围栏。命令中出现项目外路径时降级为 ask，由用户把关（与文件工具同一套确认）
+    if verdict == "allow" and _has_outside_path(command):
+        verdict = "ask"
     if verdict == "deny":
         return "该命令被权限规则禁止执行（permissions.json 中为 deny）"
     if verdict == "ask" and not _confirm(command):
