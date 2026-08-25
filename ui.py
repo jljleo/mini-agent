@@ -187,7 +187,7 @@ class StreamRenderer:
         self._plain = not console.is_terminal
         self._status = None
         self._live: Live | None = None
-        self._markdown = ""
+        self._tail = ""  # 进行中的尾部（Live 只渲染它）；已完成的块已落卷轴
         self._last_render = 0.0
         self._reasoning_shown = 0
         self._reasoning_truncated = False
@@ -223,6 +223,27 @@ class StreamRenderer:
             self._reasoning_truncated = True
         console.print(chunk, end="", style="reasoning", markup=False, soft_wrap=True)
 
+    def _finalize_complete_blocks(self) -> None:
+        """把已完成的块（空行分界）永久落卷轴，Live 只保留进行中的尾部。
+
+        为什么必须这么做：Live 的重绘是“光标上移 N 行重写”，N = 上次渲染高度；
+        内容超过终端高度时，超出的行已滚入 scrollback，光标上移够不到真正的起点，
+        每次刷新都在下方留下一份完整副本——长回答会随节流刷新重复几十次。
+        落卷后 Live 区域永远只有一个块的高度，从机制上杜绝超高重绘。
+
+        代码块未闭合（``` 为奇数个）时暂不落卷：半拉的 fence 单独渲染会错乱。
+        """
+        if self._tail.count("```") % 2 == 1:
+            return
+        idx = self._tail.rfind("\n\n")
+        if idx <= 0:
+            return
+        done, self._tail = self._tail[:idx + 2], self._tail[idx + 2:]
+        # Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）
+        console.print(Markdown(done))
+        self._live.update(Markdown(self._tail), refresh=False)
+        self._last_render = time.monotonic()
+
     def on_content(self, text: str) -> None:
         """正文：tty 下 Markdown Live 增量渲染；管道下纯文本直出。"""
         self._stop_spinner()
@@ -240,17 +261,18 @@ class StreamRenderer:
                 vertical_overflow="visible",
             )
             self._live.start()
-        self._markdown += text
+        self._tail += text
+        self._finalize_complete_blocks()
         now = time.monotonic()
         if now - self._last_render >= LIVE_RENDER_INTERVAL:
-            self._live.update(Markdown(self._markdown), refresh=False)
+            self._live.update(Markdown(self._tail), refresh=False)
             self._last_render = now
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self._stop_spinner()
         if self._live is not None:
-            # 终稿强制全量渲染一次，收掉节流期间的尾巴
-            self._live.update(Markdown(self._markdown), refresh=True)
+            # 终稿强制全量渲染一次，收掉节流期间的尾巴（此时只剩最后一个块）
+            self._live.update(Markdown(self._tail), refresh=True)
             self._live.stop()
             self._live = None
             console.print()
