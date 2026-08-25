@@ -105,24 +105,31 @@ def sanitize(text: str) -> str:
     return text.strip()
 
 
-def read_input(prompt: str = "") -> str:
+def read_input(prompt: str = "", prefill: str = "") -> tuple[str, bool]:
     """读取用户输入：终端下用 prompt_toolkit（历史/行编辑），管道模式退回原始读法。
+
+    返回 (清洗后的文本, 是否前导空格逃逸)：
+    - prefill：预填输入框（Codex 式——未知命令报错后恢复原文，用户修正即可重发）；
+      非交互环境无法预填，静默忽略；
+    - 前导空格 = 显式逃逸：强制按消息发送，跳过斜杠命令分发（Codex 同款）。
+      注意必须在 sanitize 之前检测——sanitize 会 strip 掉前导空格。
 
     可能抛出 EOFError（Ctrl+D / 管道耗尽）或 KeyboardInterrupt（Ctrl+C），
     由调用方决定如何收尾。
     """
     if sys.stdin.isatty():
         # ❯ 提示符：品牌色加粗；prompt_toolkit 遇到 Ctrl+C/Ctrl+D 抛 KeyboardInterrupt/EOFError
-        return sanitize(_get_prompt_session().prompt(HTML("<prompt>❯</prompt> ")))
+        raw = _get_prompt_session().prompt(HTML("<prompt>❯</prompt> "), default=prefill)
+    else:
+        # 非交互环境（管道/重定向）：prompt_toolkit 不适用，退回字节读取
+        print(prompt, end="", flush=True)
+        raw_b = sys.stdin.buffer.readline()
+        if raw_b == b"":
+            raise EOFError
+        raw = raw_b.decode("utf-8", errors="replace")
 
-    # 非交互环境（管道/重定向）：prompt_toolkit 不适用，退回字节读取
-    print(prompt, end="", flush=True)
-    raw = sys.stdin.buffer.readline()
-
-    if raw == b"":
-        raise EOFError
-
-    return sanitize(raw.decode("utf-8", errors="replace"))
+    forced = raw.startswith(" ")
+    return sanitize(raw), forced
 
 
 # 确认等待的最长秒数：防"假 tty"（isatty 为 True 但无人应答）导致永久阻塞

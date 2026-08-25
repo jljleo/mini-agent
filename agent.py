@@ -7,7 +7,7 @@
     - 异常回滚：本轮失败时整体撤销已产生的消息
 
 工具精简后，本模块不再感知具体工具——执行表来自 registry.TOOLS，
-动态声明来自 registry.get_all_tool_schemas()，新增工具零改动接入。
+动态声明来自 registry.get_resident_tool_schemas()，新增工具零改动接入。
 """
 
 import json
@@ -39,17 +39,17 @@ from compact import (
     extract_middle,
     summarize_middle,
 )
-from tool_registry import SEARCH_TOOLS_SCHEMA, TOOLS, get_all_tool_schemas, get_extended_tool_schemas
+from tool_registry import TOOLS, get_resident_tool_schemas, get_extended_tool_schemas
 from streaming import stream_and_assemble
 from tools import set_history_provider
 
-# 常驻请求的工具声明：search_tools（发现入口，面向未来扩展工具如 MCP）+
-# 全部 resident 业务工具（8 个才 ~2.4K tokens，缓存全命中近乎免费）。
-# 可发现工具（resident=False）不常驻，由 search_tools 检索后注入。
-# NOTE: $web_search（WEB_SEARCH_SCHEMA）暂不接入——Moonshot 平台 bug：
-# kimi-k3 上回传 builtin_function 工具结果必现 400 tokenization failed
-# （官方论坛 2026-07-23 已报，未修）。平台修复后直接加进 tools= 声明即可。
-BASE_TOOLS = [SEARCH_TOOLS_SCHEMA]
+# 常驻请求的工具声明：search_tools（发现入口）+ 核心四件套（RESIDENT_TOOL_NAMES）。
+# 模块级算一次即可——本行执行时 tools.py 已完成导入注册（上方 from tools import），
+# 常驻档是静态集合，无需每轮重算。可发现工具（名单外）由 search_tools 检索后注入。
+# NOTE: $web_search 暂不接入——Moonshot 平台 bug：kimi-k3 上回传 builtin_function
+# 工具结果必现 400 tokenization failed（官方论坛 2026-07-23 已报，未修）。
+# 平台修复后把名字加进 RESIDENT_TOOL_NAMES 即可。
+BASE_TOOLS = get_resident_tool_schemas()
 
 def load_saved_session() -> dict | None:
     """读取会话存档；不存在或损坏返回 None（存档是增强，不是依赖）。"""
@@ -185,7 +185,7 @@ class ChatSession:
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
                     # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
                     messages=payload,
-                    tools=BASE_TOOLS + get_all_tool_schemas(),  # 发现入口 + 全部常驻工具
+                    tools=BASE_TOOLS,  # 发现入口 + 常驻四件套（模块级预计算）
                     stream=True,
                     stream_options={"include_usage": True}
                 )

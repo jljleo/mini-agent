@@ -1,4 +1,4 @@
-"""业务工具实现：用 @tool 装饰器注册到 registry。
+"""业务工具实现：用 @tool 装饰器注册到 registry（含 search_tools 发现入口）。
 
 文件工具（read_file/write_file/edit_file）为窄接口：项目内免确认，项目外人工确认
 （围栏内自由、围栏外审批——与权限系统同一思路）；run_bash 为通用接口：
@@ -13,7 +13,29 @@ import subprocess
 import ui
 from config import MAX_OUTPUT_LEN, MAX_TIMEOUT, PROJECT_ROOT
 from input_utils import confirm
-from tool_registry import tool
+from tool_registry import tool, get_extended_tool_schemas
+
+
+# ---------- 工具发现入口：search_tools ----------
+
+
+@tool(
+    "search_tools",
+    "Search for additional (non-resident) tools beyond the ones already "
+    "declared. Only needed when existing tools cannot do the job.",
+    {},
+)
+def search_tools() -> str:
+    """返回可发现（非常驻名单外）工具的声明，供模型检索后调用。
+
+    当前没有可发现工具时明确告知——空列表会让模型困惑（“是不是检索失败了”）。
+    本工具在常驻名单内（RESIDENT_TOOL_NAMES），因此自动被可发现档排除，
+    无自我引用问题（旧设计需手写 schema 特殊处理，名单制后与普通工具无异）。
+    """
+    extended = get_extended_tool_schemas()
+    if not extended:
+        return "（当前没有额外的可发现工具，请直接使用已声明的工具）"
+    return json.dumps(extended, ensure_ascii=False)
 
 
 # ---------- 文件窄接口工具：路径围栏 + 免确认 ----------
@@ -276,7 +298,6 @@ def run_bash(command: str, timeout: int = 30) -> str:
 
 
 # ---------- 历史检索：统一兑现三层上下文管理的“可恢复”承诺 ----------
-
 # 数据源由 ChatSession 构造时注入（工具函数无状态，历史由会话持有）
 _history_provider = None
 
@@ -305,7 +326,6 @@ def set_history_provider(fn) -> None:
         },
     },
     ["keyword"],
-    resident=False,
 )
 def search_history(keyword: str, context_chars: int = 200) -> str:
     """全文检索会话存储，返回命中片段（含消息下标与角色）。
@@ -394,7 +414,6 @@ def _render_todos(todos: list[dict]) -> str:
         }
     },
     ["todos"],
-    resident=False,
 )
 def todo_write(todos: list[dict]) -> str:
     """创建和管理当前编码会话的任务列表。
@@ -417,7 +436,6 @@ def todo_write(todos: list[dict]) -> str:
     "todo_read",
     "Read the current coding session's task list.",
     {},
-    resident=False,
 )
 def todo_read() -> str:
     """读取当前编码会话的任务列表。文件不存在时返回空清单提示。"""

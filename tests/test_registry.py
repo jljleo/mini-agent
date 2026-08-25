@@ -7,7 +7,7 @@ import pytest
 import command_registry
 import tool_registry
 import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册（与 main.py 同一机制）
-from tool_registry import TOOLS, get_all_tool_schemas, tool
+from tool_registry import TOOLS, get_resident_tool_schemas, tool
 
 
 @pytest.fixture
@@ -37,31 +37,35 @@ class TestToolRegistry:
 
         assert f.tool_schema["function"]["parameters"]["required"] == []
 
-    def test_get_all_excludes_search_tools(self, clean_tools):
-        """search_tools 的声明由 SEARCH_TOOLS_SCHEMA 常驻，不参与聚合（防自我引用）。"""
-        names = [s["function"]["name"] for s in get_all_tool_schemas()]
-        assert "search_tools" not in names
+    def test_search_tools_resident_not_extended(self, clean_tools):
+        """search_tools 在常驻名单内：随 tools= 常驻，且自动被可发现档排除（防自我引用）。"""
+        resident = {s["function"]["name"] for s in get_resident_tool_schemas()}
+        extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
+        assert "search_tools" in resident
+        assert "search_tools" not in extended
 
-    def test_resident_default_true(self, clean_tools):
-        """默认常驻：8 个基本工具直接进 tools= 参数，无需先检索。"""
-        @tool("demo_resident", "演示", {})
+    def test_new_tool_defaults_discoverable(self, clean_tools):
+        """新注册工具默认可发现（名单外）；进常驻需在 RESIDENT_TOOL_NAMES 显式登记。"""
+        @tool("demo_new", "演示", {})
         def f():
             return "ok"
 
-        assert f.tool_resident is True
-        names = [s["function"]["name"] for s in get_all_tool_schemas()]
-        assert "demo_resident" in names
+        resident = {s["function"]["name"] for s in get_resident_tool_schemas()}
+        extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
+        assert "demo_new" not in resident
+        assert "demo_new" in extended
 
-    def test_extended_split(self, clean_tools):
-        """resident=False 进可发现档：不常驻 tools=，由 search_tools 检索后注入。"""
-        @tool("demo_extended", "演示", {}, resident=False)
-        def f():
-            return "ok"
-
-        resident_names = [s["function"]["name"] for s in get_all_tool_schemas()]
-        extended_names = [s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()]
-        assert "demo_extended" not in resident_names
-        assert "demo_extended" in extended_names
+    def test_resident_name_typo_fails_fast(self, clean_tools):
+        """名单写错名字当场 KeyError，好过静默漏挂一个工具。"""
+        monkeypatched = ("read_file", "typo_tool")
+        import tool_registry as tr
+        original = tr.RESIDENT_TOOL_NAMES
+        tr.RESIDENT_TOOL_NAMES = monkeypatched
+        try:
+            with pytest.raises(KeyError):
+                get_resident_tool_schemas()
+        finally:
+            tr.RESIDENT_TOOL_NAMES = original
 
     def test_search_tools_empty_extended_gives_guidance(self, clean_tools):
         """没有可发现工具时返回明确指引而非空列表（空列表会让模型以为检索失败）。"""
@@ -72,7 +76,7 @@ class TestToolRegistry:
 
     def test_search_tools_returns_only_extended(self, clean_tools):
         """核心互斥：search_tools 绝不能返回常驻工具（常驻 + 注入 = duplicate 400）。"""
-        @tool("demo_extended2", "演示", {}, resident=False)
+        @tool("demo_extended2", "演示", {})
         def f():
             return "ok"
 
@@ -81,10 +85,10 @@ class TestToolRegistry:
         assert "read_file" not in names  # 常驻四件套绝不在可发现档
 
     def test_core_four_resident_others_discoverable(self):
-        """分档契约：read/write/edit_file + run_bash 常驻，其余走 search_tools 发现。"""
-        resident = {s["function"]["name"] for s in get_all_tool_schemas()}
+        """分档契约：search_tools + read/write/edit_file + run_bash 常驻，其余走发现。"""
+        resident = {s["function"]["name"] for s in get_resident_tool_schemas()}
         extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
-        assert resident == {"read_file", "write_file", "edit_file", "run_bash"}
+        assert resident == {"search_tools", "read_file", "write_file", "edit_file", "run_bash"}
         assert extended == {"search_history", "todo_write", "todo_read"}
 
     def test_business_tools_registered(self):
