@@ -20,7 +20,6 @@ from config import (
     API_KEY_ENV,
     BASE_URL,
     MAX_SAME_TOOL_CALLS,
-    MAX_TOOL_ROUNDS,
     MODEL,
     SYSTEM_MESSAGES,
     SESSION_FILE,
@@ -163,7 +162,10 @@ class ChatSession:
         last_call_sig = None
         same_call_count = 0
 
-        for _ in range(MAX_TOOL_ROUNDS):
+        # 无硬性轮次上限（与 pi/Codex/Claude Code 交互模式一致）：交互场景人在看，
+        # 硬上限只会误杀合法长任务。失控防线是行为保险丝（同签名连续重复熔断）。
+        # bench 等无人值守场景若需要上限，应加在调用侧而非污染交互循环
+        while True:
             # 每轮重算投影：工具循环内历史只涨不停（单轮最多 30 次调用×10K 字符），
             # 轮边界的检测看不见"单轮爆炸"，超线时应急升级截断（L1 硬切，不插 L2 调用）
             # 瘦身与体积上限均不改消息数量与顺序，cut 下标对投影同样有效
@@ -257,5 +259,3 @@ class ChatSession:
                         self.messages.append(
                             {"role": "system", "tools": get_extended_tool_schemas()}
                         )
-        else:
-            ui.warn(f"工具调用超过 {MAX_TOOL_ROUNDS} 轮，已强制结束本轮对话")
