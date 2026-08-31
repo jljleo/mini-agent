@@ -25,6 +25,19 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.theme import Theme
 
+from events import (
+    Note,
+    ReasoningDelta,
+    StreamFinished,
+    StreamStart,
+    TextDelta,
+    ToolCallResult,
+    ToolCallStart,
+    TurnEnd,
+    Usage,
+    Warn,
+)
+
 THEME = Theme(
     {
         "accent": "bright_cyan",
@@ -175,10 +188,8 @@ def confirm_prompt_text(command: str, dangerous: bool, timeout: int) -> str:
 class StreamRenderer:
     """一轮 API 响应的渲染管线：spinner → 思考暗色预览 → 正文 Markdown Live。
 
-    用法（agent.chat 工具循环内，每轮请求一个实例）：
-        with StreamRenderer() as renderer:
-            completion = client.chat.completions.create(..., stream=True)
-            messages, usage = stream_and_assemble(completion, renderer)
+    不直接实例化——由 consume() 在收到 StreamStart / StreamFinished 事件时
+    自动启停（一次请求一个实例）。
 
     spinner 覆盖 connect + TTFT 的"静默尴尬期"；非 tty 自动降级为纯文本直出。
     """
@@ -279,3 +290,49 @@ class StreamRenderer:
         elif self._reasoning_shown:
             console.print(" …" if self._reasoning_truncated else "")
         return False
+
+
+# ---- 事件消费（agent 内核事件流 → 终端渲染的桥）----
+
+
+def consume(events) -> None:
+    """终端消费者：把 agent 内核产出的事件流渲染到终端。
+
+    内核（agent.py / streaming.py）不再 import ui——它是事件的生产者，
+    这里是消费者之一（其余消费者：bench 的静默统计、将来的 Web GUI）。
+    StreamRenderer 的生命周期由 StreamStart / StreamFinished 事件驱动；
+    异常（如 Ctrl+C）也要收掉渲染器，防 Live 区域残留在终端上。
+    """
+    renderer: StreamRenderer | None = None
+    try:
+        for ev in events:
+            if isinstance(ev, StreamStart):
+                renderer = StreamRenderer()
+                renderer.__enter__()
+            elif isinstance(ev, ReasoningDelta):
+                if renderer:
+                    renderer.on_reasoning(ev.text)
+            elif isinstance(ev, TextDelta):
+                if renderer:
+                    renderer.on_content(ev.text)
+                else:
+                    print(ev.text, end="", flush=True)  # 防御：无渲染器时纯文本直出
+            elif isinstance(ev, StreamFinished):
+                if renderer:
+                    renderer.__exit__(None, None, None)
+                    renderer = None
+            elif isinstance(ev, ToolCallStart):
+                tool_call(ev.name, ev.arguments)
+            elif isinstance(ev, ToolCallResult):
+                tool_result(ev.preview)
+            elif isinstance(ev, Note):
+                note(ev.message, tag=ev.tag)
+            elif isinstance(ev, Warn):
+                warn(ev.message)
+            elif isinstance(ev, Usage):
+                token_line(ev.prompt, ev.completion, ev.cached, ev.total)
+            elif isinstance(ev, TurnEnd):
+                pass  # 终端无需动作；Web/日志消费者用它复位状态
+    finally:
+        if renderer is not None:
+            renderer.__exit__(None, None, None)

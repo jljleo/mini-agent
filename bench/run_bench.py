@@ -33,6 +33,7 @@ TASKS_DIR = BENCH_DIR / "tasks"
 RESULTS_DIR = BENCH_DIR / "results"
 
 import tools  # noqa: E402
+import ui  # noqa: E402
 from agent import ChatSession  # noqa: E402
 
 
@@ -63,7 +64,8 @@ def run_task(task_dir: Path) -> dict:
     session = None
     try:
         session = ChatSession()
-        session.chat(prompt)
+        # chat() 是事件流生成器：bench 复用终端消费者（输出保持可见，便于观察轨迹）
+        ui.consume(session.chat(prompt))
     except Exception as e:
         # agent 崩溃 ≠ 任务失败：记录崩溃原因，仍走 verify（可能部分完成）
         print(f"[bench] agent 异常中断: {type(e).__name__}: {e}", file=sys.stderr)

@@ -1,23 +1,23 @@
 """流式响应拼装：把 SSE chunk 流聚合成完整的 assistant 消息。
 
 模型流式返回时，content 逐字到达、tool_calls 按碎片分片，
-本模块负责逐步拼装，输出定稿消息；渲染委托给注入的 renderer
-（ui.StreamRenderer：on_reasoning / on_content 回调），本模块不感知终端。
-renderer 为 None 时 content 退化为纯文本直出（兜底路径）。
+本模块负责逐步拼装；拼装过程同时产出事件流（events.py）——
+TextDelta / ReasoningDelta 逐 chunk 产出，StreamFinished 收尾带回定稿与 usage。
+本模块不感知任何界面：渲染是事件消费者（ui.consume 等）的职责。
 """
 
-from openai.types import CompletionUsage
+from events import ReasoningDelta, StreamFinished, TextDelta
 
 
-def stream_and_assemble(completion, renderer=None) -> tuple[list[dict], CompletionUsage | None]:
-    """遍历流式 chunk：reasoning/content 回调 renderer，tool_calls 碎片逐步拼装。
+def stream_and_assemble(completion):
+    """生成器：遍历流式 chunk，边拼装边产出事件。
 
-    返回 (组装定稿的 assistant 消息列表, usage 对象或 None)。
-    usage 是请求级元数据（账单），只走返回值通道，不写进消息体——避免随历史回传 API。
+    产出序列：ReasoningDelta / TextDelta（任意数量、可交错）→ StreamFinished（恰好一个，收尾）。
+    usage 是请求级元数据（账单），只经 StreamFinished 携带，不写进消息体——避免随历史回传 API。
     """
     stream_messages_dict = {}
 
-    stream_usage: CompletionUsage | None = None
+    stream_usage = None
 
     for chunk in completion:
 
@@ -46,21 +46,17 @@ def stream_and_assemble(completion, renderer=None) -> tuple[list[dict], Completi
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
                 message["reasoning_content"] = message.get("reasoning_content", "") + reasoning
-                if renderer:
-                    renderer.on_reasoning(reasoning)
+                yield ReasoningDelta(reasoning)
 
             content = delta.content
             if content:  # 大部分 chunk 的 content 是 None，必须守卫
-                if renderer:
-                    renderer.on_content(content)
-                else:
-                    print(content, end="", flush=True)  # 兜底：无渲染器时纯文本直出
                 message["content"] = message.get("content", "") + content
+                yield TextDelta(content)
 
             if delta.tool_calls:
                 _merge_tool_calls(message, delta.tool_calls)
 
-    return _finalize(stream_messages_dict), stream_usage
+    yield StreamFinished(_finalize(stream_messages_dict), stream_usage)
 
 
 def _merge_tool_calls(message: dict, delta_tool_calls) -> None:

@@ -1,11 +1,15 @@
-"""streaming.py 回归测试：SSE chunk 流 → 定稿消息的拼装逻辑。
+"""streaming.py 回归测试：SSE chunk 流 → 事件流 + 定稿消息的拼装逻辑。
 
 用 SimpleNamespace 伪造 OpenAI SDK 的 chunk 结构（duck typing 足够，
 streaming 本就只用 getattr/属性访问，不依赖真实类型）。
+
+事件契约：stream_and_assemble 是生成器，产出 ReasoningDelta / TextDelta
+（任意数量、可交错）→ StreamFinished（恰好一个，收尾，带回定稿消息与 usage）。
 """
 
 from types import SimpleNamespace
 
+from events import ReasoningDelta, StreamFinished, TextDelta
 from streaming import stream_and_assemble
 
 
@@ -27,50 +31,49 @@ def chunk(*choices, usage=None):
     return SimpleNamespace(choices=list(choices), usage=usage)
 
 
-class RecordingRenderer:
-    def __init__(self):
-        self.reasoning, self.content = [], []
-
-    def on_reasoning(self, text):
-        self.reasoning.append(text)
-
-    def on_content(self, text):
-        self.content.append(text)
+def run(stream):
+    """消费事件流，返回 (定稿消息列表, usage, 全部事件)。"""
+    events = list(stream_and_assemble(iter(stream)))
+    finished = [e for e in events if isinstance(e, StreamFinished)]
+    assert len(finished) == 1, "事件流必须以恰好一个 StreamFinished 收尾"
+    assert isinstance(events[-1], StreamFinished), "StreamFinished 必须是最后一个事件"
+    return finished[0].messages, finished[0].usage, events
 
 
 class TestContentAssembly:
     def test_content_concatenated_across_chunks(self):
         stream = [chunk(choice(delta(role="assistant", content="你"))),
                   chunk(choice(delta(content="好")))]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, events = run(stream)
         assert msgs[0]["content"] == "你好"
         assert msgs[0]["role"] == "assistant"
+        assert [e.text for e in events if isinstance(e, TextDelta)] == ["你", "好"]
 
     def test_none_content_guarded(self):
         """大部分 chunk 的 content 是 None，必须守卫（回归防线）。"""
         stream = [chunk(choice(delta(role="assistant"))),
                   chunk(choice(delta(content="x")))]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, events = run(stream)
         assert msgs[0]["content"] == "x"
+        assert len([e for e in events if isinstance(e, TextDelta)]) == 1
 
-    def test_reasoning_preserved_and_rendered(self):
-        r = RecordingRenderer()
+    def test_reasoning_preserved_and_emitted(self):
         stream = [chunk(choice(delta(role="assistant", reasoning="想一"))),
                   chunk(choice(delta(reasoning="想二", content="答")))]
-        msgs, _ = stream_and_assemble(iter(stream), r)
+        msgs, _, events = run(stream)
         assert msgs[0]["reasoning_content"] == "想一想二"
-        assert r.reasoning == ["想一", "想二"]
-        assert r.content == ["答"]
+        assert [e.text for e in events if isinstance(e, ReasoningDelta)] == ["想一", "想二"]
+        assert [e.text for e in events if isinstance(e, TextDelta)] == ["答"]
 
     def test_finish_reason_recorded(self):
         stream = [chunk(choice(delta(content="x"), finish_reason="length"))]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, _ = run(stream)
         assert msgs[0]["_finish_reason"] == "length"
 
     def test_multiple_choices_become_multiple_messages(self):
         stream = [chunk(choice(delta(role="assistant", content="零"), index=0),
                         choice(delta(role="assistant", content="一"), index=1))]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, _ = run(stream)
         assert [m["content"] for m in msgs] == ["零", "一"]
 
 
@@ -83,7 +86,7 @@ class TestToolCallMerging:
                                               name="read_file", arguments='{"pa')]))),
             chunk(choice(delta(tool_calls=[tc(0, arguments='th": "a.py"}')]))),
         ]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, _ = run(stream)
         call = msgs[0]["tool_calls"][0]
         assert call["id"] == "c1"
         assert call["function"]["name"] == "read_file"
@@ -95,7 +98,7 @@ class TestToolCallMerging:
             role="assistant",
             tool_calls=[tc(0, id="c1", type="function", name="f", arguments="{}"),
                         tc(1, id="c2", type="function", name="g", arguments="{}")])))]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, _ = run(stream)
         names = [c["function"]["name"] for c in msgs[0]["tool_calls"]]
         assert names == ["f", "g"]
 
@@ -104,27 +107,28 @@ class TestToolCallMerging:
         stream = [chunk(choice(delta(role="assistant",
                                      tool_calls=[tc(0, id="c1", type="function",
                                                     name="f", arguments="{}")])))]
-        msgs, _ = stream_and_assemble(iter(stream))
+        msgs, _, _ = run(stream)
         assert "index" not in msgs[0]["tool_calls"][0]
 
 
 class TestUsage:
-    def test_usage_returned_not_in_message(self):
-        """usage 是账单元数据：走返回值通道，绝不写进消息体（会随历史回传 API）。"""
+    def test_usage_carried_by_stream_finished_not_in_message(self):
+        """usage 是账单元数据：只经 StreamFinished 携带，绝不写进消息体（会随历史回传 API）。"""
         usage = SimpleNamespace(prompt_tokens=100, completion_tokens=10)
         stream = [chunk(choice(delta(content="x"))),
                   chunk(usage=usage)]  # 末 chunk choices 为空
-        msgs, got = stream_and_assemble(iter(stream))
+        msgs, got, _ = run(stream)
         assert got is usage
         assert "usage" not in msgs[0]
 
     def test_no_usage_returns_none(self):
-        _, got = stream_and_assemble(iter([chunk(choice(delta(content="x")))]))
+        _, got, _ = run([chunk(choice(delta(content="x")))])
         assert got is None
 
 
-class TestFallback:
-    def test_no_renderer_prints_plaintext(self, capsys):
-        """兜底路径：无渲染器时 content 纯文本直出。"""
-        stream_and_assemble(iter([chunk(choice(delta(content="直出")))]))
-        assert capsys.readouterr().out == "直出"
+class TestEventContract:
+    def test_streaming_itself_prints_nothing(self, capsys):
+        """streaming 不感知界面：不准直接 print——渲染是事件消费者（ui.consume）的事。"""
+        _, _, events = run([chunk(choice(delta(content="直出")))])
+        assert capsys.readouterr().out == ""
+        assert [e.text for e in events if isinstance(e, TextDelta)] == ["直出"]

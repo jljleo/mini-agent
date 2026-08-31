@@ -1,7 +1,7 @@
-"""agent.py 回归测试：会话状态管理（回滚/存档/注入检测）与死循环保险丝。
+"""agent.py 回归测试：会话状态管理（回滚/存档/注入检测）、死循环保险丝与事件契约。
 
-chat() 主循环的 API 调用用 monkeypatch 打桩：stream_and_assemble 返回罐头消息，
-client.create 返回空壳——测的是循环控制逻辑，不是网络。
+chat() 主循环是事件流生成器：API 调用用 monkeypatch 打桩（stream_and_assemble
+返回罐头 StreamFinished 事件，client.create 返回空壳）——测的是循环控制逻辑，不是网络。
 """
 
 import json
@@ -9,6 +9,7 @@ import os
 
 import agent
 from agent import ChatSession, load_saved_session
+from events import StreamFinished, TurnEnd, Warn
 
 
 class TestMarkRollback:
@@ -74,14 +75,6 @@ class TestExecuteToolCall:
         assert "调用失败" in result
 
 
-class DummyRenderer:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-
 def stub_chat_network(session, monkeypatch):
     """打桩网络层：create 返回空壳（流由 stream_and_assemble 的桩接管）。
 
@@ -91,21 +84,24 @@ def stub_chat_network(session, monkeypatch):
                         lambda **kwargs: object())
 
 
+def canned(messages, usage=None):
+    """罐头事件流：stream_and_assemble 的桩，直接吐出 StreamFinished。"""
+    return lambda completion: iter([StreamFinished(messages, usage)])
+
+
 class TestDeadLoopFuse:
     def test_same_call_three_times_intercepted(self, session, monkeypatch):
         """行为保险丝：同一 (工具名, 参数) 连续 3 次判死循环，强制结束并补拦截结果。"""
         stub_chat_network(session, monkeypatch)
-        monkeypatch.setattr(agent.ui, "StreamRenderer", lambda: DummyRenderer())
         monkeypatch.setitem(agent.TOOLS, "fake_tool", lambda: "ok")
 
         call = {"id": "c1", "type": "function",
                 "function": {"name": "fake_tool", "arguments": "{}"}}
         monkeypatch.setattr(
             agent, "stream_and_assemble",
-            lambda completion, renderer: (
-                [{"role": "assistant", "content": "", "tool_calls": [dict(call)]}], None))
+            canned([{"role": "assistant", "content": "", "tool_calls": [dict(call)]}]))
 
-        session.chat("测试死循环")
+        events = list(session.chat("测试死循环"))
 
         intercepts = [m for m in session.messages
                       if "[系统] 同一调用连续重复" in str(m.get("content", ""))]
@@ -114,27 +110,55 @@ class TestDeadLoopFuse:
         last_tool_idx = max(i for i, m in enumerate(session.messages)
                             if m.get("role") == "tool")
         assert session.messages[last_tool_idx]["content"].startswith("[系统]")
+        assert isinstance(events[-1], TurnEnd), "熔断结束也必须产出 TurnEnd 收尾"
+        assert any(isinstance(e, Warn) for e in events)
 
     def test_normal_calls_not_misjudged(self, session, monkeypatch):
         """正常任务每次调用参数不同，不得误伤。"""
         stub_chat_network(session, monkeypatch)
-        monkeypatch.setattr(agent.ui, "StreamRenderer", lambda: DummyRenderer())
         monkeypatch.setitem(agent.TOOLS, "fake_tool", lambda: "ok")
 
         state = {"n": 0}
 
-        def fake_assemble(completion, renderer):
+        def fake_assemble(completion):
             state["n"] += 1
             if state["n"] <= 3:
                 # 每次参数不同
                 call = {"id": f"c{state['n']}", "type": "function",
                         "function": {"name": "fake_tool",
                                      "arguments": json.dumps({"i": state["n"]})}}
-                return [{"role": "assistant", "content": "", "tool_calls": [call]}], None
-            return [{"role": "assistant", "content": "完成"}], None
+                return iter([StreamFinished(
+                    [{"role": "assistant", "content": "", "tool_calls": [call]}], None)])
+            return iter([StreamFinished([{"role": "assistant", "content": "完成"}], None)])
 
         monkeypatch.setattr(agent, "stream_and_assemble", fake_assemble)
-        session.chat("正常任务")
+        events = list(session.chat("正常任务"))
         assert session.messages[-1]["content"] == "完成"
         assert not any("[系统] 同一调用连续重复" in str(m.get("content", ""))
                        for m in session.messages)
+        assert isinstance(events[-1], TurnEnd), "终稿结束必须产出 TurnEnd 收尾"
+
+
+class TestTruncatedToolCallsVoided:
+    def test_length_truncated_tool_calls_voided(self, session, monkeypatch):
+        """stopReason=length 时整批 tool call 作废（pi 同款加固）：
+        arguments JSON 可能不完整，执行半个参数比不执行更危险。"""
+        stub_chat_network(session, monkeypatch)
+        executed = []
+        monkeypatch.setitem(agent.TOOLS, "fake_tool",
+                            lambda: executed.append(1) or "ok")
+        call = {"id": "c1", "type": "function",
+                "function": {"name": "fake_tool", "arguments": '{"path": "/etc'}}
+        monkeypatch.setattr(
+            agent, "stream_and_assemble",
+            canned([{"role": "assistant", "content": "", "tool_calls": [dict(call)],
+                     "_finish_reason": "length"}]))
+
+        events = list(session.chat("截断测试"))
+
+        assert not executed, "截断轮的工具调用不应被执行"
+        voided = [m for m in session.messages if "已作废" in str(m.get("content", ""))]
+        assert len(voided) == 1, "每个 tool_call 都必须补作废结果（孤儿 tool_call 必 400）"
+        assert voided[0]["tool_call_id"] == "c1"
+        assert isinstance(events[-1], TurnEnd)
+        assert any(isinstance(e, Warn) and "截断" in e.message for e in events)

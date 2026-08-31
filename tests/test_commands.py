@@ -81,7 +81,8 @@ class TestCompact:
             session.messages.append({"role": "user", "content": "x" * 5000})
             session.messages.append({"role": "assistant", "content": "y" * 5000})
 
-        monkeypatch.setattr(commands, "summarize_middle", lambda middle, client: "假摘要")
+        monkeypatch.setattr(commands, "summarize_middle",
+                            lambda middle, client, on_note=None: "假摘要")
         original = list(session.messages)
 
         cmd_compact(session)
@@ -100,6 +101,6 @@ class TestCompact:
             session.messages.append({"role": "assistant", "content": "y" * 5000})
 
         monkeypatch.setattr(commands, "summarize_middle",
-                            lambda middle, client: None)
+                            lambda middle, client, on_note=None: None)
         cmd_compact(session)
         assert any("截断" in str(m.get("content", "")) for m in session.messages)

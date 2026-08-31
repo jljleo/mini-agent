@@ -49,7 +49,7 @@ def main() -> None:
 
         mark = session.mark()  # 记录历史位置，失败时整体回滚本轮产生的所有消息
         try:
-            session.chat(question)
+            ui.consume(session.chat(question))  # 内核产出事件流，终端消费渲染
             session.save()  # 每轮成功后自动存档：崩溃也不丢进度（/resume 恢复）
         except Exception as e:
             session.rollback(mark)

@@ -103,7 +103,8 @@ def cmd_compact(session: ChatSession, args: str = ""):
 
     session.compact_archive = list(session.messages)  # 归档原文：突变前的后悔药
     # L2 优先：让模型把中段压缩成交接摘要；失败时 note=None 回退 L1 硬切标记
-    summary = summarize_middle(extract_middle(slimmed, cut), session.client)
+    summary = summarize_middle(extract_middle(slimmed, cut), session.client,
+                               on_note=lambda m: ui.note(m, tag="compact"))
     note = f"[早期对话历史摘要]\n{summary}" if summary else None
     session.messages = apply_truncation(slimmed, cut, note)
 

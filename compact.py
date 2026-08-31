@@ -14,7 +14,6 @@
 
 import json
 
-import ui
 from config import (
     MODEL,
     SINGLE_MSG_CAP_CHARS,
@@ -303,11 +302,13 @@ def extract_middle(messages: list[dict], cut: int) -> list[dict]:
     return [m for i, m in enumerate(messages) if i < cut and i not in prefix]
 
 
-def summarize_middle(middle: list[dict], client, model: str = MODEL) -> str | None:
+def summarize_middle(middle: list[dict], client, model: str = MODEL, on_note=None) -> str | None:
     """调用模型把中段历史压缩成交接摘要；任何失败返回 None（上层回退 L1 硬切）。
 
     L2 被触发的时刻正是上下文将爆的压力时刻，摘要请求自身失败概率偏高，
     所以这里必须静默容错，绝不能让压缩动作把主流程拖崩。
+    on_note：可选的消息回调（内核传事件收集器，命令层传 ui.note）——
+    compact 是内核模块，不直接感知界面。
     """
     if not middle:
         return None
@@ -325,7 +326,8 @@ def summarize_middle(middle: list[dict], client, model: str = MODEL) -> str | No
         )
         return resp.choices[0].message.content
     except Exception as e:
-        ui.note(f"L2 摘要失败（{type(e).__name__}），回退 L1 硬切", tag="compact")
+        if on_note:
+            on_note(f"L2 摘要失败（{type(e).__name__}），回退 L1 硬切")
         return None
 
 
