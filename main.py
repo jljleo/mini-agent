@@ -1,43 +1,25 @@
-"""CLI 入口：主循环与运行调度，业务逻辑下沉到 agent / input_utils / ui / bridge。
+"""CLI 入口：主循环与运行调度，业务逻辑下沉到 agent / input_utils / ui / tui。
 
 运行：python main.py
-退出：exit / quit / :q / /quit / Ctrl+C / Ctrl+D（运行中 Ctrl+C = 打断本轮，不退出）
+退出：exit / quit / :q / /quit / Ctrl+C / Ctrl+D（运行中 Ctrl+C / Esc = 打断本轮，不退出）
 
 两种形态：
-- tty（_tui_loop）：常驻输入框（prompt_toolkit + patch_stdout）——agent 运行时
-  输入框不消失：输入回车 = 追加消息（steering 队列，轮边界注入）；
-  Esc / Ctrl+C = 立即打断（control.abort() 断流，不等下一个 chunk）；
-  确认请求由输入框 y/n 按键应答（ApprovalChannel）
+- tty：Textual 全屏前端（tui.py）——输出 viewport 独立滚动，输入/确认/状态固定底部 dock；
+  运行中回车 = 追加消息（steering 队列，轮边界注入），Esc / Ctrl+C = 打断本轮
 - 管道（_pipe_loop）：回合制读取 + 线程桥（bridge.py），无运行中交互
 """
 
-import queue
 import sys
-import threading
 
 import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
 import commands  # noqa: F401  集中式注册：导入即触发 @command 注册
-
-from prompt_toolkit.patch_stdout import patch_stdout
 
 import ui
 from agent import ChatSession
 from bridge import run_in_thread
 from command_registry import COMMANDS
 from config import MODEL, PROJECT_ROOT, QUIT_COMMANDS
-from events import TurnControl
-from input_utils import (
-    ApprovalChannel,
-    abort_pending_approval,
-    begin_run,
-    current_control,
-    end_run,
-    is_running,
-    read_input,
-    set_approval_channel,
-    set_status_provider,
-    take_prefill,
-)
+from input_utils import read_input, set_status_provider
 
 
 def _dispatch_command(session: ChatSession, question: str, forced: bool):
@@ -56,82 +38,6 @@ def _dispatch_command(session: ChatSession, question: str, forced: bool):
         ui.warn(f"未知命令: {name}（输入 /help 查看可用命令）")
         return "prefill"
     return False
-
-
-# ---- tty：常驻输入框 ----
-
-
-def _run_turn(session: ChatSession, question: str, control: TurnControl) -> None:
-    """运行线程：驱动内核事件流并渲染；成功存档、失败回滚、steering 余量回填。"""
-    mark = session.mark()
-    try:
-        # live=False：patch_stdout 下禁用 Live 光标重绘，正文按块落卷
-        ui.consume(session.chat(question, control=control), live=False)
-        session.save()  # 每轮成功（含优雅中断收尾）后自动存档
-    except Exception as e:
-        session.rollback(mark)
-        ui.error(f"{type(e).__name__}: {e}")
-    finally:
-        # 本轮没等到注入时机的 steering（如模型一轮就出终稿）：存为下轮回填，
-        # 不吞用户输入（与未知命令报错回填同一约定）
-        leftover = []
-        while True:
-            try:
-                leftover.append(control.steer.get_nowait())
-            except queue.Empty:
-                break
-        end_run(leftover)
-
-
-def _tui_loop(session: ChatSession) -> None:
-    set_approval_channel(ApprovalChannel())
-    prefill = ""
-    # patch_stdout：运行线程的输出被抬升到常驻输入框上方
-    with patch_stdout(raw=True):
-        while True:
-            prefill = prefill or take_prefill()
-            try:
-                question, forced = read_input(prefill=prefill)
-            except KeyboardInterrupt:
-                # Ctrl+C：运行中 = 立即打断本轮（断流 + 联动拒绝待确认）；空闲 = 退出
-                control = current_control()
-                if control is not None:
-                    control.abort()
-                    abort_pending_approval()
-                    continue
-                ui.goodbye()
-                break
-            except EOFError:  # Ctrl+D
-                ui.goodbye()
-                break
-            prefill = ""
-
-            if not question:
-                continue
-            if is_running():
-                # 运行中：一切输入都按追加消息处理（此时执行命令太危险——
-                # /clear 之类会拆运行中的会话）
-                current_control().steer.put(question)
-                ui.note(f"❯ {question}（已排队，将在当前步骤完成后注入）", tag="steer")
-                continue
-
-            verdict = _dispatch_command(session, question, forced)
-            if verdict == "quit":
-                break
-            if verdict is True:
-                continue
-            if verdict == "prefill":
-                prefill = question  # 报错但不清空：回填原文，用户修正后重发
-                continue
-
-            control = TurnControl()
-            begin_run(control)  # 先登记运行态再启动线程，防时序窗口
-            threading.Thread(
-                target=_run_turn, args=(session, question, control), daemon=True,
-            ).start()
-
-
-# ---- 管道：回合制 + 线程桥 ----
 
 
 def _pipe_loop(session: ChatSession) -> None:
@@ -171,11 +77,13 @@ def _pipe_loop(session: ChatSession) -> None:
 
 def main() -> None:
     session = ChatSession()
-    set_status_provider(session.status_text)  # 输入区底部状态栏：模型 · token 累计
+    set_status_provider(session.status_text)  # 管道模式输入区底部状态栏：模型 · token 累计
     ui.banner(MODEL, PROJECT_ROOT)
 
     if sys.stdin.isatty():
-        _tui_loop(session)
+        import tui  # 延迟导入：管道模式不加载 Textual
+
+        tui.run(session)
     else:
         _pipe_loop(session)
 
