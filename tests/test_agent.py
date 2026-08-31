@@ -9,7 +9,7 @@ import os
 
 import agent
 from agent import ChatSession, load_saved_session
-from events import StreamFinished, TurnEnd, Warn
+from events import Note, StreamFinished, TextDelta, TurnControl, TurnEnd, Warn
 
 
 class TestMarkRollback:
@@ -162,3 +162,107 @@ class TestTruncatedToolCallsVoided:
         assert voided[0]["tool_call_id"] == "c1"
         assert isinstance(events[-1], TurnEnd)
         assert any(isinstance(e, Warn) and "截断" in e.message for e in events)
+
+
+class TestInterruptDuringStreaming:
+    def test_interrupt_discards_partial_stream(self, session, monkeypatch):
+        """检查点②（事件间隙）：中断即弃流——部分响应不入历史，无配对问题。"""
+        stub_chat_network(session, monkeypatch)
+        control = TurnControl()
+
+        def trickle(completion):
+            yield TextDelta("已经输出的部分")
+            control.interrupt.set()  # 模拟用户在流式中途按下 Ctrl+C
+            yield TextDelta("不应送达的部分")
+            yield StreamFinished([{"role": "assistant", "content": "完整答案"}], None)
+
+        monkeypatch.setattr(agent, "stream_and_assemble", trickle)
+        events = list(session.chat("会被中断的提问", control=control))
+
+        # 部分响应未入历史：历史里只有 user 消息（中断前无 assistant 消息 append）
+        roles = [m["role"] for m in session.messages[len(agent.SYSTEM_MESSAGES):]
+                 if m.get("role") in ("user", "assistant", "tool")]
+        assert roles == ["user"], f"中断后历史应只剩 user 消息，实际: {roles}"
+        texts = [e.text for e in events if isinstance(e, TextDelta)]
+        assert texts == ["已经输出的部分"], "中断后的事件不应送达消费者"
+        assert any(isinstance(e, Warn) and "中断" in e.message for e in events)
+        assert isinstance(events[-1], TurnEnd)
+
+
+class TestInterruptBetweenToolCalls:
+    def test_remaining_tool_calls_get_interrupted_results(self, session, monkeypatch):
+        """检查点③（工具间隙）：剩余调用补 interrupted 结果防孤儿 400。"""
+        stub_chat_network(session, monkeypatch)
+        control = TurnControl()
+        executed = []
+
+        def first_tool():
+            control.interrupt.set()  # 第一个工具执行期间用户中断
+            executed.append("first")
+            return "ok"
+
+        monkeypatch.setitem(agent.TOOLS, "first_tool", first_tool)
+        monkeypatch.setitem(agent.TOOLS, "second_tool",
+                            lambda: executed.append("second") or "ok")
+
+        calls = [
+            {"id": "c1", "type": "function",
+             "function": {"name": "first_tool", "arguments": "{}"}},
+            {"id": "c2", "type": "function",
+             "function": {"name": "second_tool", "arguments": "{}"}},
+        ]
+        monkeypatch.setattr(agent, "stream_and_assemble",
+                            canned([{"role": "assistant", "content": "",
+                                     "tool_calls": calls}]))
+
+        events = list(session.chat("带两个工具的提问", control=control))
+
+        assert executed == ["first"], "中断后第二个工具不应执行"
+        tool_msgs = [m for m in session.messages if m.get("role") == "tool"]
+        assert len(tool_msgs) == 2, "每个 tool_call 都必须有结果（孤儿必 400）"
+        assert "中断" in tool_msgs[1]["content"]
+        assert isinstance(events[-1], TurnEnd)
+
+
+class TestSteering:
+    def test_steer_message_injected_at_turn_boundary(self, session, monkeypatch):
+        """steering：运行中插话在轮边界 drain，作为 user 消息注入历史。"""
+        stub_chat_network(session, monkeypatch)
+        control = TurnControl()
+        control.steer.put("顺便改成中文输出")
+
+        state = {"n": 0}
+
+        def fake_assemble(completion):
+            state["n"] += 1
+            if state["n"] == 1:
+                call = {"id": "c1", "type": "function",
+                        "function": {"name": "fake_tool", "arguments": "{}"}}
+                return iter([StreamFinished(
+                    [{"role": "assistant", "content": "", "tool_calls": [call]}], None)])
+            return iter([StreamFinished([{"role": "assistant", "content": "完成"}], None)])
+
+        monkeypatch.setitem(agent.TOOLS, "fake_tool", lambda: "ok")
+        monkeypatch.setattr(agent, "stream_and_assemble", fake_assemble)
+        events = list(session.chat("原始提问", control=control))
+
+        steer_msgs = [m for m in session.messages
+                      if m.get("role") == "user" and m.get("content") == "顺便改成中文输出"]
+        assert steer_msgs, "steering 消息应注入历史"
+        assert any(isinstance(e, Note) and e.tag == "steer" for e in events)
+        assert session.messages[-1]["content"] == "完成"
+
+    def test_interrupt_wins_over_steering(self, session, monkeypatch):
+        """interrupt 优先于 steering：用户叫停了就不再注入新话。"""
+        stub_chat_network(session, monkeypatch)
+        control = TurnControl()
+        control.steer.put("来不及注入的话")
+        control.interrupt.set()
+
+        monkeypatch.setattr(agent, "stream_and_assemble",
+                            canned([{"role": "assistant", "content": "不应到达"}]))
+        events = list(session.chat("提问", control=control))
+
+        assert not any(m.get("content") == "来不及注入的话" for m in session.messages)
+        assert not any(m.get("content") == "不应到达" for m in session.messages)
+        assert isinstance(events[-1], TurnEnd)

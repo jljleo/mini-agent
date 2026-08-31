@@ -186,25 +186,28 @@ def confirm_prompt_text(command: str, dangerous: bool, timeout: int) -> str:
 
 
 class StreamRenderer:
-    """一轮 API 响应的渲染管线：spinner → 思考暗色预览 → 正文 Markdown Live。
+    """一轮 API 响应的渲染管线。
 
-    不直接实例化——由 consume() 在收到 StreamStart / StreamFinished 事件时
-    自动启停（一次请求一个实例）。
-
-    spinner 覆盖 connect + TTFT 的"静默尴尬期"；非 tty 自动降级为纯文本直出。
+    两种 tty 形态 + 管道降级：
+    - live=True（默认，旧式回合制）：spinner → 思考暗色预览 → 正文 Markdown Live 增量重排
+    - live=False（常驻输入框模式）：patch_stdout 下不能用光标重绘——
+      思考逐块暗色直出；正文按块（空行分界）落卷渲染 Markdown，未闭合尾部
+      等 StreamFinished 收尾渲染。牺牲逐字重排，换输入框常驻
+    - 非 tty：纯文本直出
     """
 
-    def __init__(self) -> None:
+    def __init__(self, live: bool = True) -> None:
         self._plain = not console.is_terminal
+        self._live_ok = live and not self._plain
         self._status = None
         self._live: Live | None = None
-        self._tail = ""  # 进行中的尾部（Live 只渲染它）；已完成的块已落卷轴
+        self._tail = ""  # 进行中的尾部；已完成的块已落卷轴
         self._last_render = 0.0
         self._reasoning_shown = 0
         self._reasoning_truncated = False
 
     def __enter__(self) -> "StreamRenderer":
-        if not self._plain:
+        if self._live_ok:
             self._status = console.status("[faint]思考中…[/]", spinner="dots")
             self._status.start()
         return self
@@ -242,6 +245,9 @@ class StreamRenderer:
         每次刷新都在下方留下一份完整副本——长回答会随节流刷新重复几十次。
         落卷后 Live 区域永远只有一个块的高度，从机制上杜绝超高重绘。
 
+        非 Live（常驻输入框）模式下，落卷就是唯一的渲染方式：
+        块完成即渲染 Markdown，尾部等收尾。
+
         代码块未闭合（``` 为奇数个）时暂不落卷：半拉的 fence 单独渲染会错乱。
         """
         if self._tail.count("```") % 2 == 1:
@@ -250,18 +256,20 @@ class StreamRenderer:
         if idx <= 0:
             return
         done, self._tail = self._tail[:idx + 2], self._tail[idx + 2:]
-        # Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）
+        # Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）；
+        # patch_stdout 下则被抬升到输入框上方——两种形态共用这一行
         console.print(Markdown(done))
-        self._live.update(Markdown(self._tail), refresh=False)
+        if self._live is not None:
+            self._live.update(Markdown(self._tail), refresh=False)
         self._last_render = time.monotonic()
 
     def on_content(self, text: str) -> None:
-        """正文：tty 下 Markdown Live 增量渲染；管道下纯文本直出。"""
+        """正文：Live 模式增量重排尾部；常驻输入框模式只落卷完成块；管道纯文本直出。"""
         self._stop_spinner()
         if self._plain:
             print(text, end="", flush=True)
             return
-        if self._live is None:
+        if self._live_ok and self._live is None:
             if self._reasoning_shown:
                 # 思考与正文之间留白；被截断的思考以省略号收尾
                 console.print(" …" if self._reasoning_truncated else "")
@@ -274,10 +282,11 @@ class StreamRenderer:
             self._live.start()
         self._tail += text
         self._finalize_complete_blocks()
-        now = time.monotonic()
-        if now - self._last_render >= LIVE_RENDER_INTERVAL:
-            self._live.update(Markdown(self._tail), refresh=False)
-            self._last_render = now
+        if self._live is not None:
+            now = time.monotonic()
+            if now - self._last_render >= LIVE_RENDER_INTERVAL:
+                self._live.update(Markdown(self._tail), refresh=False)
+                self._last_render = now
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self._stop_spinner()
@@ -287,6 +296,10 @@ class StreamRenderer:
             self._live.stop()
             self._live = None
             console.print()
+        elif self._tail:
+            # 常驻输入框模式：收尾把未闭合的尾部块渲染出来
+            console.print(Markdown(self._tail))
+            console.print()
         elif self._reasoning_shown:
             console.print(" …" if self._reasoning_truncated else "")
         return False
@@ -295,19 +308,22 @@ class StreamRenderer:
 # ---- 事件消费（agent 内核事件流 → 终端渲染的桥）----
 
 
-def consume(events) -> None:
+def consume(events, *, live: bool = True) -> None:
     """终端消费者：把 agent 内核产出的事件流渲染到终端。
 
     内核（agent.py / streaming.py）不再 import ui——它是事件的生产者，
     这里是消费者之一（其余消费者：bench 的静默统计、将来的 Web GUI）。
     StreamRenderer 的生命周期由 StreamStart / StreamFinished 事件驱动；
     异常（如 Ctrl+C）也要收掉渲染器，防 Live 区域残留在终端上。
+
+    live=False：常驻输入框模式（patch_stdout 下禁用光标重绘），
+    正文按块落卷渲染而非逐字重排。
     """
     renderer: StreamRenderer | None = None
     try:
         for ev in events:
             if isinstance(ev, StreamStart):
-                renderer = StreamRenderer()
+                renderer = StreamRenderer(live=live)
                 renderer.__enter__()
             elif isinstance(ev, ReasoningDelta):
                 if renderer:

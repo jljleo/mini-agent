@@ -9,8 +9,8 @@ streaming 本就只用 getattr/属性访问，不依赖真实类型）。
 
 from types import SimpleNamespace
 
-from events import ReasoningDelta, StreamFinished, TextDelta
-from streaming import stream_and_assemble
+from events import ReasoningDelta, StreamFinished, TextDelta, TurnControl
+from streaming import interruptible_stream, stream_and_assemble
 
 
 def tc(index, id=None, type=None, name=None, arguments=None):
@@ -132,3 +132,52 @@ class TestEventContract:
         _, _, events = run([chunk(choice(delta(content="直出")))])
         assert capsys.readouterr().out == ""
         assert [e.text for e in events if isinstance(e, TextDelta)] == ["直出"]
+
+
+class TestInterruptibleStream:
+    def test_chunks_pass_through_in_order(self):
+        """无中断时：chunk 原样按序透传（包装不改变正常路径）。"""
+        control = TurnControl()
+        source = interruptible_stream(lambda: iter(["a", "b", "c"]), control)
+        assert list(source) == ["a", "b", "c"]
+
+    def test_interrupt_raises_promptly_even_when_stream_stuck(self):
+        """流卡死（TTFT/长推理无 chunk）时，中断也有界延迟（≤0.1s 轮询粒度）。
+
+        回归防线：closer 断流对跨线程阻塞读不可靠（实测 15s 未唤醒），
+        所以阻塞被挪进后台泵线程，消费侧轮询旗帜——此测试卡住泵线程验证。
+        """
+        import time as _time
+
+        from streaming import StreamAborted
+
+        control = TurnControl()
+
+        def stuck():
+            _time.sleep(30)  # 泵线程卡死（daemon，测试结束即回收）
+            yield "永远到不了"
+
+        source = interruptible_stream(stuck, control)
+        t0 = _time.monotonic()
+        control.interrupt.set()  # 主侧置旗帜
+        try:
+            next(source)
+            assert False, "应抛 StreamAborted"
+        except StreamAborted:
+            pass
+        assert _time.monotonic() - t0 < 5, "中断响应应在轮询粒度内，而非等卡死的流"
+
+    def test_pump_exception_propagates(self):
+        """泵线程里的异常（网络错误）原样 re-raise，不吞。"""
+        control = TurnControl()
+
+        def broken():
+            raise ConnectionError("network down")
+            yield
+
+        source = interruptible_stream(broken, control)
+        try:
+            next(source)
+            assert False
+        except ConnectionError:
+            pass

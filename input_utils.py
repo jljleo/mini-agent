@@ -1,11 +1,16 @@
-"""输入处理：终端交互读取 + 管道读取 + 文本清洗 + 命令确认。
+"""输入处理：常驻输入框（tty）+ 管道读取 + 文本清洗 + 确认通道。
 
 全程序只此一套输入体系（prompt_toolkit），避免多处 input()/select 混用
 导致 stdin 缓冲冲突（正是"输 y 卡死"的根因）。
 
-终端下用 prompt_toolkit（历史/行编辑/幽灵建议/单键确认），管道/重定向退回原始读法。
-所有输入统一 sanitize：NFC 规范化 + 控制字符过滤。
+tty 形态（main._tui_loop）：常驻 ❯ 输入框 + patch_stdout——agent 运行时
+输入框不消失，运行输出自动抬升到输入框上方：
+    - 空闲时 Enter = 发起新一轮；运行中 Enter = 追加消息（steering 队列）
+    - Esc / Ctrl+C = 立即打断（control.abort()：置旗帜 + 关闭活动流，零延迟）
+    - 确认请求（危险命令/越界文件）由输入框 y/n 按键应答（ApprovalChannel）
+管道形态（main._pipe_loop）：回合制原始读取，无运行中交互。
 
+所有输入统一 sanitize：NFC 规范化 + 控制字符过滤。
 界面元素（❯ 提示符样式、底部状态栏、确认框文案）的配色与文案定义在 ui.py，
 本模块只负责装配 prompt_toolkit 部件。
 """
@@ -17,6 +22,7 @@ import unicodedata
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -52,7 +58,112 @@ def set_status_provider(fn) -> None:
     _status_provider = fn
 
 
+# ---- 运行状态（常驻输入框与运行线程共享）----
+
+
+class ApprovalChannel:
+    """常驻输入框模式的确认通道：确认请求打印到滚动区，y/n 由按键绑定应答。
+
+    替代旧的"独立确认弹窗"——常驻输入框下同时只能有一个 prompt 会话，
+    确认不再另起会话，而是复用输入框的按键（filter=有待确认时才拦截 y/n）。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending: tuple[str, bool] | None = None
+        self._answered = threading.Event()
+        self._result = False
+
+    @property
+    def has_pending(self) -> bool:
+        with self._lock:
+            return self._pending is not None
+
+    def ask(self, command: str, dangerous: bool, timeout: int) -> bool:
+        """运行线程（工具执行深处）调用：挂起等待输入框 y/n，超时默认拒绝。"""
+        with self._lock:
+            self._pending = (command, dangerous)
+            self._answered.clear()
+            self._result = False
+        # 确认文案走 print：patch_stdout 会把它抬升到输入框上方
+        print(ui.confirm_prompt_text(command, dangerous, timeout), flush=True)
+        answered = self._answered.wait(timeout)
+        with self._lock:
+            self._pending = None
+            result = self._result
+        if not answered:
+            # 超时兜底（假 tty / 用户离开）：拒绝
+            ui.error(f"{timeout}s 内未收到确认，已默认拒绝")
+            return False
+        print("y" if result else "n")  # 单键无回显，补一行答案留痕
+        return result
+
+    def answer(self, yes: bool) -> None:
+        """输入线程按键绑定调用。无待确认时不应被触发（按键 filter 保证）。"""
+        with self._lock:
+            if self._pending is None:
+                return
+            self._result = yes
+            self._answered.set()
+
+
+_approval_channel: ApprovalChannel | None = None
+
+
+def set_approval_channel(channel: ApprovalChannel | None) -> None:
+    """main（tty）启动时登记确认通道；confirm() 优先走它，缺省回退旧单键弹窗。"""
+    global _approval_channel
+    _approval_channel = channel
+
+
+def abort_pending_approval() -> None:
+    """打断时联动：待确认的请求按拒绝放行，防内核在确认上等满超时。"""
+    if _approval_channel is not None and _approval_channel.has_pending:
+        _approval_channel.answer(False)
+
+
+_run_lock = threading.Lock()
+_run_control = None          # 运行中轮次的 TurnControl（None = 空闲）
+_next_prefill = ""           # 上轮未注入的 steering，回填下一个输入框
+
+
+def is_running() -> bool:
+    with _run_lock:
+        return _run_control is not None
+
+
+def current_control():
+    with _run_lock:
+        return _run_control
+
+
+def begin_run(control) -> None:
+    """运行开始前登记（main 线程，启动运行线程之前——防时序窗口）。"""
+    global _run_control
+    with _run_lock:
+        _run_control = control
+
+
+def end_run(leftover_steer: list[str]) -> None:
+    """运行结束（运行线程）：清除运行态；未注入的 steering 存为下轮回填。"""
+    global _run_control, _next_prefill
+    with _run_lock:
+        _run_control = None
+        if leftover_steer:
+            _next_prefill = "\n".join(leftover_steer)
+
+
+def take_prefill() -> str:
+    """主循环取走上轮回填（一次性）。"""
+    global _next_prefill
+    with _run_lock:
+        prefill, _next_prefill = _next_prefill, ""
+    return prefill
+
+
 def _bottom_toolbar() -> HTML:
+    if is_running():
+        return HTML("<bottom-toolbar> ● 运行中 · 输入回车=追加 · Esc/Ctrl+C=打断 · 确认按 y/n </bottom-toolbar>")
     if _status_provider is None:
         return HTML("<bottom-toolbar> </bottom-toolbar>")
     try:
@@ -82,6 +193,36 @@ class SlashCommandCompleter(Completer):
                 yield Completion(name, start_position=-len(text), display_meta=meta)
 
 
+def _build_keybindings() -> KeyBindings:
+    """常驻输入框的按键绑定：确认应答（y/n，仅有待确认时拦截）+ Esc 立即打断。"""
+    kb = KeyBindings()
+
+    def approval_pending() -> bool:
+        return _approval_channel is not None and _approval_channel.has_pending
+
+    @kb.add("y", filter=Condition(approval_pending))
+    @kb.add("Y", filter=Condition(approval_pending))
+    def _yes(event):
+        _approval_channel.answer(True)
+
+    @kb.add("n", filter=Condition(approval_pending))
+    @kb.add("N", filter=Condition(approval_pending))
+    def _no(event):
+        _approval_channel.answer(False)
+
+    @kb.add("escape", eager=True)  # eager：不等转义序列超时，Esc 即按即断
+    def _esc(event):
+        if approval_pending():
+            _approval_channel.answer(False)  # 有待确认：Esc = 拒绝
+            return
+        control = current_control()
+        if control is not None:
+            control.abort()  # 运行中：立即打断（置旗帜 + 断流，零延迟）
+            abort_pending_approval()  # 联动：待确认的确认框一并按拒绝放行
+
+    return kb
+
+
 def _get_prompt_session() -> PromptSession:
     global _prompt_session
     if _prompt_session is None:
@@ -91,12 +232,13 @@ def _get_prompt_session() -> PromptSession:
             auto_suggest=AutoSuggestFromHistory(),  # 历史幽灵建议：灰色尾随，→ 键采纳
             style=_PROMPT_STYLE,
             bottom_toolbar=_bottom_toolbar,
+            key_bindings=_build_keybindings(),
         )
     return _prompt_session
 
 
 def sanitize(text: str) -> str:
-    """清洗输入：NFC 规范化 + 剥掉控制字符（保留 \\n \\t）。"""
+    """清洗输入：NFC 规范化 + 剥掉控制字符（保留 \n \t）。"""
     text = unicodedata.normalize("NFC", text)
     text = "".join(
         ch for ch in text
@@ -137,11 +279,7 @@ CONFIRM_TIMEOUT = 60
 
 
 def _single_key_confirm(message: str) -> bool:
-    """prompt_toolkit 单键确认：按 y 放行，n / Esc / Ctrl+C / Enter 拒绝，无需回车。
-
-    用一次性 PromptSession + 自定义按键绑定：拦截所有可打印字符，
-    只认 y / n，其余键忽略；绑定 Enter 为"默认拒绝"，避免空等。
-    """
+    """prompt_toolkit 单键确认（旧形态回退路径，非常驻输入框模式用）。"""
     kb = KeyBindings()
     state = {"answer": False}
 
@@ -162,7 +300,6 @@ def _single_key_confirm(message: str) -> bool:
 
     # 用独立 session（不带历史），避免污染主输入的历史记录
     session: PromptSession = PromptSession(key_bindings=kb)
-    # prompt 返回 event.app.exit 的 result；异常（如 Ctrl+D）一律视为拒绝。
     # ANSI() 包装：prompt_toolkit 对纯字符串不解析转义序列（安全设计），
     # 需显式声明"此文本含 ANSI 颜色码"，否则 \033 会以 ^[ 形式原样显示
     try:
@@ -174,14 +311,17 @@ def _single_key_confirm(message: str) -> bool:
 def confirm(command: str, dangerous: bool) -> bool:
     """命令执行前的用户确认：y 放行，其余拒绝；带超时与假 tty 防护。
 
-    三层防线：
-      1. 非 tty（管道/重定向）：无法交互，默认拒绝；
-      2. tty 但超时无人应答（假 tty）：默认拒绝；
-      3. 只有明确按 y 才放行。
+    通道选择：
+      - 常驻输入框模式（_approval_channel 已登记）：打印确认文案，按键绑定应答；
+      - 否则回退旧的独立单键弹窗（子线程 + join 超时）。
+    三层防线不变：非 tty 默认拒绝；超时默认拒绝；只有明确按 y 才放行。
     """
     if not sys.stdin.isatty():
         ui.error("非交互环境无法确认，已默认拒绝执行该命令")
         return False
+
+    if _approval_channel is not None:
+        return _approval_channel.ask(command, dangerous, CONFIRM_TIMEOUT)
 
     message = ui.confirm_prompt_text(command, dangerous, CONFIRM_TIMEOUT)
 

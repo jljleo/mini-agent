@@ -15,6 +15,7 @@
 
 import json
 import os
+import queue
 
 from openai import OpenAI
 
@@ -24,6 +25,7 @@ from events import (
     StreamStart,
     ToolCallResult,
     ToolCallStart,
+    TurnControl,
     TurnEnd,
     Usage,
     Warn,
@@ -51,7 +53,7 @@ from compact import (
     summarize_middle,
 )
 from tool_registry import TOOLS, get_resident_tool_schemas, get_extended_tool_schemas
-from streaming import stream_and_assemble
+from streaming import interruptible_stream, stream_and_assemble
 from tools import set_history_provider
 
 # 常驻请求的工具声明：search_tools（发现入口）+ 核心四件套（RESIDENT_TOOL_NAMES）。
@@ -122,6 +124,26 @@ class ChatSession:
 
     # ---- 工具执行 ----
 
+    @staticmethod
+    def _interrupted(control: TurnControl | None) -> bool:
+        """中断旗帜是否已置位（control 缺省 = 无控制通道，永不中断）。"""
+        return bool(control and control.interrupt.is_set())
+
+    def _drain_steering(self, control: TurnControl):
+        """轮次间隙拉取 steering 队列（生成器）：运行中插话只注入在合法消息边界。
+
+        pi 的 PendingMessageQueue 同款 drain 语义：消息作为 user 角色注入历史，
+        下次请求生效。绝不在流式/工具执行中途插入（会切出半个 tool 配对）。
+        """
+        while True:
+            try:
+                text = control.steer.get_nowait()
+            except queue.Empty:
+                return
+            self.messages.append({"role": "user", "content": text})
+            yield Note(f"已注入运行中消息：{text[:60]}{'…' if len(text) > 60 else ''}",
+                       tag="steer")
+
     def _execute_tool_call(self, tool_call: dict) -> tuple[str, str]:
         """执行单个工具调用，返回 (工具名, 结果文本)。任何失败都转为文本结果，不向上抛。"""
         name = tool_call["function"].get("name")
@@ -141,11 +163,12 @@ class ChatSession:
 
     # ---- 主循环 ----
 
-    def chat(self, user_input: str):
+    def chat(self, user_input: str, control: TurnControl | None = None):
         """一轮提问（生成器）：append → 请求 → 流式 → 工具循环，直到模型给出终稿。
 
         全程只产出事件流（events.py），不感知界面。调用方必须消费完整个流
         （ui.consume / for 循环），生成器不消费就不执行。
+        control：可选控制通道（interrupt / steering），缺省时行为与纯交互一致。
         """
         self.messages.append({"role": "user", "content": user_input})
 
@@ -182,6 +205,15 @@ class ChatSession:
         # 硬上限只会误杀合法长任务。失控防线是行为保险丝（同签名连续重复熔断）。
         # bench 等无人值守场景若需要上限，应加在调用侧而非污染交互循环
         while True:
+            # 控制通道检查点①（轮边界）：interrupt 优先于 steering——
+            # 用户叫停了就不要再注入新话
+            if self._interrupted(control):
+                yield Warn("本轮已被用户中断")
+                yield TurnEnd()
+                return
+            if control:
+                yield from self._drain_steering(control)
+
             # 每轮重算投影：工具循环内历史只涨不停（单轮最多 30 次调用×10K 字符），
             # 轮边界的检测看不见"单轮爆炸"，超线时应急升级截断（L1 硬切，不插 L2 调用）
             # 瘦身与体积上限均不改消息数量与顺序，cut 下标对投影同样有效
@@ -197,23 +229,46 @@ class ChatSession:
                     yield Note("工具循环内上下文超限，已应急截断（L1）", tag="compact")
 
             yield StreamStart()
-            completion = self.client.chat.completions.create(
-                model=MODEL,
-                # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
-                # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
-                messages=payload,
-                tools=BASE_TOOLS,  # 发现入口 + 常驻四件套（模块级预计算）
-                stream=True,
-                stream_options={"include_usage": True}
-            )
+            def open_stream():
+                return self.client.chat.completions.create(
+                    model=MODEL,
+                    # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
+                    # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
+                    messages=payload,
+                    tools=BASE_TOOLS,  # 发现入口 + 常驻四件套（模块级预计算）
+                    stream=True,
+                    stream_options={"include_usage": True}
+                )
+
+            if control is not None:
+                # 可中断包装：请求+读取全程在后台泵线程，主侧 100ms 轮询旗帜——
+                # 连接/TTFT/流式中途任何阶段的打断延迟都有界（closer 断流对
+                # 跨线程阻塞读不可靠，实测 abort 后 15s 未唤醒，故改为此方案）
+                source = interruptible_stream(open_stream, control)
+            else:
+                source = open_stream()
             # 流式事件原样透传给消费者；StreamFinished 是内核自留的收尾事件
             # （定稿消息与 usage 从它身上取回，继续驱动工具循环）
             assistant_messages, usage = [], None
-            for ev in stream_and_assemble(completion):
-                if isinstance(ev, StreamFinished):
-                    assistant_messages, usage = ev.messages, ev.usage
-                else:
-                    yield ev
+            try:
+                for ev in stream_and_assemble(source):
+                    # 检查点②（事件间隙）：中断即弃流——部分响应尚未 append 进历史，
+                    # 不存在配对问题，是干净的放弃点
+                    if self._interrupted(control):
+                        yield Warn("本轮已被用户中断，未完成的部分输出已丢弃")
+                        yield TurnEnd()
+                        return
+                    if isinstance(ev, StreamFinished):
+                        assistant_messages, usage = ev.messages, ev.usage
+                    else:
+                        yield ev
+            except Exception:
+                # StreamAborted / abort 断流导致的读取异常——预期内的中断路径
+                if self._interrupted(control):
+                    yield Warn("本轮已被用户中断，未完成的部分输出已丢弃")
+                    yield TurnEnd()
+                    return
+                raise
 
             if usage:
                 calibrate(usage.prompt_tokens, payload)  # 用真实值校准估算系数，观测闭环
@@ -255,6 +310,20 @@ class ChatSession:
                     return
 
                 for i, tool_call in enumerate(tool_calls):
+                    # 检查点③（工具间隙）：剩余调用补 interrupted 结果防孤儿 400。
+                    # 正在执行的单个工具不打断——强杀 bash 子进程是另一档工程（v1 等它自然结束）
+                    if self._interrupted(control):
+                        for tc in tool_calls[i:]:
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id"),
+                                "name": tc["function"].get("name"),
+                                "content": "[系统] 本轮已被用户中断，该调用未执行。",
+                            })
+                        yield Warn("已中断：剩余工具调用未执行")
+                        yield TurnEnd()
+                        return
+
                     # 死循环保险丝（行为识别）：同一 (工具名, 参数) 连续出现 N 次即判定卡死。
                     # 正常任务每次调用参数不同不会误伤；真卡死的模型几轮内被揪出
                     sig = (

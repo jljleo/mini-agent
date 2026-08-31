@@ -30,7 +30,8 @@ def make_renderer(monkeypatch):
     DummyLive.instances.clear()
     monkeypatch.setattr(ui, "Live", DummyLive)
     r = StreamRenderer()
-    r._plain = False  # 绕过 is_terminal 检测，强制走 Live 路径
+    r._plain = False   # 绕过 is_terminal 检测，强制走 Live 路径
+    r._live_ok = True  # _live_ok 在 __init__ 时按 is_terminal 计算，需同步强制
     return r
 
 
