@@ -35,7 +35,6 @@ def judge(client: OpenAI, task_output: str, rubric: str) -> dict:
             {"role": "system", "content": _JUDGE_SYSTEM},
             {"role": "user", "content": f"评分标准：\n{rubric}\n\n任务产出：\n{task_output}"},
         ],
-        temperature=0,
     )
     raw = response.choices[0].message.content or ""
     return _parse_score(raw)
