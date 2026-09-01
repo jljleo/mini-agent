@@ -48,13 +48,14 @@ from trace import TraceRecorder  # noqa: E402
 
 
 def discover_tasks(only: str | None = None) -> list[Path]:
-    """发现任务目录：含 PROMPT.md 与 verify.py 的才算完整任务。
+    """发现任务目录：含 PROMPT.md 的即算任务。
 
-    注意：llm-judge 任务没有 verify.py，当前版本暂不支持自动发现（见 score_task 注释）。
+    verify.py 按需存在：deterministic / graded 任务必须有，llm-judge 任务
+    （META.json 里 judge=llm-judge）没有 verify.py——产出是对话正文，判分走 judge.py。
     """
     tasks = sorted(
         d for d in TASKS_DIR.iterdir()
-        if d.is_dir() and (d / "PROMPT.md").exists() and (d / "verify.py").exists()
+        if d.is_dir() and (d / "PROMPT.md").exists()
     )
     if only:
         tasks = [d for d in tasks if d.name == only]
@@ -86,8 +87,17 @@ def score_task(meta: dict, task_dir: Path, sandbox: Path, session) -> dict:
             "judge_reason": result["reason"],
         }
 
+    verify = task_dir / "verify.py"
+    if not verify.exists():
+        return {
+            "passed": False,
+            "score": 0.0,
+            "method": judge_type,
+            "error": f"{judge_type} 任务缺 verify.py（llm-judge 任务才不需要）",
+        }
+
     proc = subprocess.run(
-        [sys.executable, str(task_dir / "verify.py")],
+        [sys.executable, str(verify)],
         cwd=sandbox, capture_output=True, text=True, timeout=60,
     )
     verify_stdout, verify_stderr = proc.stdout[-2000:], proc.stderr[-2000:]
