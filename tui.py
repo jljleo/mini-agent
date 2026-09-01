@@ -23,7 +23,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import Input, Markdown, Static
+from textual.widgets import Input, Markdown, OptionList, Static
+from textual.widgets.option_list import Option
 
 import ui
 import commands  # noqa: F401  集中式注册：导入即触发 @command 注册（不依赖 main.py 的副作用导入）
@@ -208,11 +209,52 @@ class Dock(Vertical):
         yield Static("", id="approval")
         yield Static("", id="queued")
         yield Static(f"{MODEL} · tokens 0", id="status")
+        yield OptionList(id="completion")
         yield Input(placeholder="输入问题开始对话 · /help 查看命令", id="prompt")
 
     def on_mount(self) -> None:
         self.query_one("#approval", Static).display = False
         self.query_one("#queued", Static).display = False
+        self.query_one("#completion", OptionList).display = False
+
+    # ---- 斜杠命令补全（迁移自 prompt_toolkit 的 SlashCommandCompleter）----
+
+    def _update_completion(self, value: str) -> None:
+        """输入以 / 开头时，弹出匹配命令的下拉提示；否则收起。"""
+        completion = self.query_one("#completion", OptionList)
+        if not value.startswith("/"):
+            completion.display = False
+            return
+        # /quit 不在 COMMANDS（走主循环退出词表），补全里单独补上
+        candidates = {**COMMANDS, "/quit": None}
+        options = [
+            Option(f"{name}  {fn.description if fn is not None else '退出程序'}", id=name)
+            for name, fn in candidates.items()
+            if name.startswith(value) and name != value
+        ]
+        completion.clear_options()
+        if options:
+            completion.add_options(options)
+            completion.display = True
+        else:
+            completion.display = False
+
+    def has_completion(self) -> bool:
+        return self.query_one("#completion", OptionList).display
+
+    def hide_completion(self) -> None:
+        self.query_one("#completion", OptionList).display = False
+
+    @on(Input.Changed)
+    def _on_input_changed(self, event: Input.Changed) -> None:
+        self._update_completion(event.value)
+
+    @on(OptionList.OptionSelected)
+    def _on_option_selected(self, event: OptionList.OptionSelected) -> None:
+        prompt = self.query_one("#prompt", Input)
+        prompt.value = event.option_id
+        self.hide_completion()
+        prompt.focus()
 
     def queued_text(self) -> str:
         if not self._queued:
@@ -344,6 +386,10 @@ class MiniAgentApp(App):
     def action_interrupt_or_exit(self) -> None:
         if self.approval.has_pending:
             self.approval.answer(False)
+            return
+        if self.dock.has_completion():
+            self.dock.hide_completion()
+            self.query_one("#prompt", Input).focus()
             return
         if self.running and self.control is not None:
             self.control.abort()

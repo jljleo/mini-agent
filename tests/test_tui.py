@@ -296,3 +296,44 @@ def test_ctrl_c_running_aborts_control():
             assert app.control.interrupt.is_set()
 
     run(scenario())
+
+
+def test_slash_command_completion_shows_and_hides():
+    # 回归：迁移 Textual 后斜杠命令补全下拉提示框丢失
+    from tui import MiniAgentApp
+
+    async def scenario():
+        app = MiniAgentApp(session=FakeSession())
+        async with app.run_test() as pilot:
+            prompt = app.query_one("#prompt")
+            completion = app.query_one("#completion")
+            assert completion.display is False  # 初始隐藏
+
+            prompt.value = "/"
+            await pilot.pause()
+            assert completion.display is True
+            assert completion.option_count > 0
+            completion.get_option("/help")  # /help 应在候选里
+
+            prompt.value = "普通问题"
+            await pilot.pause()
+            assert completion.display is False
+
+    run(scenario())
+
+
+def test_esc_dismisses_completion_not_exit():
+    from tui import MiniAgentApp
+
+    async def scenario():
+        app = MiniAgentApp(session=FakeSession())
+        async with app.run_test() as pilot:
+            app.query_one("#prompt").value = "/"
+            await pilot.pause()
+            assert app.dock.has_completion() is True
+
+            app.action_interrupt_or_exit()  # Esc：应先收补全，而非直接退出
+            await pilot.pause()
+            assert app.dock.has_completion() is False
+
+    run(scenario())
