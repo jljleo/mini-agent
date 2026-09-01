@@ -5,9 +5,16 @@
 """
 
 import io
+import os
 import threading
 import time
 from queue import Empty
+
+# iTerm2 + Kitty 键盘协议的已知 IME 缺陷：中文候选选择会插入数字而非汉字。
+# 禁用 Kitty 协议后回退到传统转义序列，中文/日文/带重音字符在 iTerm2 可正常输入。
+# 须在 import textual 前生效（constants.py 模块级读取该开关）。
+# 本应用按键绑定只有 ctrl+c/ctrl+d/esc 等标准键，不依赖 Kitty 的按键消歧。
+os.environ.setdefault("TEXTUAL_DISABLE_KITTY_KEY", "1")
 
 from rich.console import Console
 from rich.text import Text
@@ -42,6 +49,21 @@ from tui_render import render_event
 _REASONING_PREVIEW_LIMIT = 600
 _STREAM_FLUSH_INTERVAL = 0.08  # 秒；TextDelta 节流，避免每个小 delta 全量 Markdown.update
 _STREAM_FLUSH_CHARS = 2000     # 累积到该字符数也立即 flush
+
+
+def _split_complete(text: str) -> tuple[str, str]:
+    """把已完成块从流式缓冲里切出来，返回 (完成部分, 尾部)。
+
+    只有 ``` 成对（偶数个）且存在空行分界时才切割：未闭合 fence 的 Markdown
+    单独渲染会错乱，必须等它闭合。完成块落卷后永不重排，只剩尾部参与增量渲染，
+    从机制上杜绝"每 chunk 全量重排长回答"的 O(n²) 抖动（同 StreamRenderer 落卷）。
+    """
+    if text.count("```") % 2 == 1:
+        return "", text
+    idx = text.rfind("\n\n")
+    if idx <= 0:
+        return "", text
+    return text[:idx + 2], text[idx + 2:]
 
 
 class KernelEvent(Message):
@@ -105,7 +127,16 @@ class TranscriptView(VerticalScroll):
     def _flush_stream(self) -> None:
         if self._stream_widget is None or not self._stream_dirty:
             return
-        self._stream_widget.update("".join(self._stream_parts))
+        full = "".join(self._stream_parts)
+        done, tail = _split_complete(full)
+        if done:
+            # 完成块永久落卷（插在流式块之前），尾部继续增量重排
+            self._blocks.append(done)
+            self.mount(Markdown(done), before=self._stream_widget)
+            self._stream_parts = [tail]
+            self._stream_widget.update(tail)
+        else:
+            self._stream_widget.update(full)
         self._stream_dirty = False
         self._stream_pending_chars = 0
         self._stream_last_flush = time.monotonic()
@@ -114,7 +145,11 @@ class TranscriptView(VerticalScroll):
     def _schedule_flush(self) -> None:
         def flush_and_reschedule() -> None:
             self._flush_stream()
-            if self._stream_widget is not None and self._stream_dirty:
+            # 流活跃期间始终续命（而非只在 dirty 时）：否则定时器触发瞬间若
+            # dirty 已被 append_text 的立即 flush 清掉，链条即断——后续慢速
+            # 流只能靠 2000 字符阈值兜底，尾部会滞留。无新内容时的 flush 是
+            # 空操作（_flush_stream 首行 early return），代价可忽略。
+            if self._stream_widget is not None:
                 self._schedule_flush()
 
         self.set_timer(_STREAM_FLUSH_INTERVAL, flush_and_reschedule)

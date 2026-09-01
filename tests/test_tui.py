@@ -20,6 +20,39 @@ from events import Note, ToolCallResult, ToolCallStart, Usage, Warn
 from tui_render import render_event
 
 
+def test_split_complete_freezes_completed_blocks_only():
+    from tui import _split_complete
+
+    assert _split_complete("完整段落\n\n尾部") == ("完整段落\n\n", "尾部")
+    assert _split_complete("无空行分隔") == ("", "无空行分隔")
+    assert _split_complete("```\n半截代码\n") == ("", "```\n半截代码\n")  # 未闭合 fence 不切
+    assert _split_complete("```\n代码\n```\n\n正文") == ("```\n代码\n```\n\n", "正文")
+
+
+def test_flush_timer_survives_dirty_clearing():
+    # 回归：定时器触发瞬间 dirty 已被立即 flush 清掉时，链条不能断。
+    # 否则后续慢速流（间隔 < 80ms）只能等 2000 字符阈值，尾部滞留。
+    from textual.app import App
+
+    from tui import TranscriptView
+
+    class BareApp(App):
+        def compose(self):
+            yield TranscriptView()
+
+    async def scenario():
+        app = BareApp()
+        async with app.run_test() as pilot:
+            v = app.query_one(TranscriptView)
+            v.append_text("A")
+            await pilot.pause(0.1)  # 定时器触发 flush "A"，dirty 清空
+            v.append_text("B")      # 间隔 < 80ms，不会立即 flush
+            await pilot.pause(0.1)  # 修复后定时器仍在，会 flush "B"
+            assert "B" in v._stream_widget._markdown
+
+    run(scenario())
+
+
 def test_render_tool_call_start_and_result():
     start = render_event(ToolCallStart("read_file", '{"path": "agent.py"}'))
     result = render_event(ToolCallResult("read_file", "ok"))
