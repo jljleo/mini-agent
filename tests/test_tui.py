@@ -337,3 +337,29 @@ def test_esc_dismisses_completion_not_exit():
             assert app.dock.has_completion() is False
 
     run(scenario())
+
+
+def test_completion_up_down_and_enter_select():
+    from tui import MiniAgentApp
+
+    async def scenario():
+        app = MiniAgentApp(session=FakeSession())
+        async with app.run_test() as pilot:
+            prompt = app.query_one("#prompt")
+            prompt.value = "/"
+            await pilot.pause()
+
+            first = app.dock.selected_completion_id()
+            assert first is not None  # 初始有高亮项
+
+            app.dock.action_completion_down()
+            await pilot.pause()
+            second = app.dock.selected_completion_id()
+            assert second is not None and second != first  # 下移后选中项变了
+
+            app.submit_text("/")  # 回车：应选中高亮项而非提交 "/"
+            await pilot.pause()
+            assert prompt.value == second
+            assert app.dock.has_completion() is False
+
+    run(scenario())

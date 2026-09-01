@@ -201,6 +201,12 @@ class TranscriptView(VerticalScroll):
 class Dock(Vertical):
     """底部固定区域：审批、排队预览、状态栏、输入框。"""
 
+    # 补全可见时：上下键在输入框内直接移动补全高亮（Input 本身无 up/down 绑定，不冲突）
+    BINDINGS = [
+        Binding("up", "completion_up", show=False),
+        Binding("down", "completion_down", show=False),
+    ]
+
     def __init__(self) -> None:
         super().__init__(id="dock")
         self._queued: list[str] = []
@@ -235,9 +241,26 @@ class Dock(Vertical):
         completion.clear_options()
         if options:
             completion.add_options(options)
+            completion.highlighted = 0
             completion.display = True
         else:
             completion.display = False
+
+    def action_completion_up(self) -> None:
+        completion = self.query_one("#completion", OptionList)
+        if completion.display:
+            completion.action_cursor_up()
+
+    def action_completion_down(self) -> None:
+        completion = self.query_one("#completion", OptionList)
+        if completion.display:
+            completion.action_cursor_down()
+
+    def selected_completion_id(self) -> str | None:
+        """返回当前高亮的补全项 id（命令名）；无高亮返回 None。"""
+        completion = self.query_one("#completion", OptionList)
+        highlighted = completion.highlighted_option
+        return highlighted.id if highlighted is not None else None
 
     def has_completion(self) -> bool:
         return self.query_one("#completion", OptionList).display
@@ -397,6 +420,16 @@ class MiniAgentApp(App):
         self.exit()
 
     def submit_text(self, raw: str) -> None:
+        # 补全可见时：回车选中当前高亮项，而非提交未写全的命令
+        if self.dock.has_completion():
+            selected = self.dock.selected_completion_id()
+            if selected is not None:
+                prompt = self.query_one("#prompt", Input)
+                prompt.value = selected
+                self.dock.hide_completion()
+                prompt.focus()
+                return
+
         question = sanitize(raw)
         if not question:
             return
