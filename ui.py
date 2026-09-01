@@ -352,3 +352,21 @@ def consume(events, *, live: bool = True) -> None:
     finally:
         if renderer is not None:
             renderer.__exit__(None, None, None)
+
+
+def consume_quiet(events) -> None:
+    """bench 专用静默消费者：只渲染工具调用与系统旁白，跳过 spinner/推理/Live/每轮 token。
+
+    与 consume() 的区别：不启动 StreamRenderer——TextDelta / ReasoningDelta / Usage
+    一律跳过（它们是交互式流式渲染的原料，bench 无人值守场景里是纯噪音）。
+    完整轨迹已由 TraceRecorder 落盘 .trace.jsonl，终端只留可快速扫读的摘要。
+    """
+    for ev in events:
+        if isinstance(ev, ToolCallStart):
+            tool_call(ev.name, ev.arguments)
+        elif isinstance(ev, ToolCallResult):
+            tool_result(ev.preview)
+        elif isinstance(ev, Note):
+            note(ev.message, tag=ev.tag)
+        elif isinstance(ev, Warn):
+            warn(ev.message)

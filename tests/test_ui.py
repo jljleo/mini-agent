@@ -1,6 +1,18 @@
 """ui.StreamRenderer 回归测试：分段落卷逻辑（长回答 Live 超高重绘重复的修复）。"""
 
 import ui
+from events import (
+    Note,
+    ReasoningDelta,
+    StreamFinished,
+    StreamStart,
+    TextDelta,
+    ToolCallResult,
+    ToolCallStart,
+    TurnEnd,
+    Usage,
+    Warn,
+)
 from ui import StreamRenderer
 
 
@@ -84,3 +96,34 @@ class TestSegmentedFinalization:
         out = capsys.readouterr().out
         assert "第 0 块" in out and "第 99 块" in out  # 全部落卷且只出现一次
         assert out.count("第 50 块") == 1
+
+
+class TestConsumeQuiet:
+    def test_quiet_renders_only_tools_and_notices(self, monkeypatch):
+        """bench 静默消费者：只渲染工具调用与旁白，跳过推理/正文/每轮 token/生命周期。"""
+        calls = []
+        monkeypatch.setattr(ui, "tool_call", lambda name, args: calls.append(("tool_call", name, args)))
+        monkeypatch.setattr(ui, "tool_result", lambda preview: calls.append(("tool_result", preview)))
+        monkeypatch.setattr(ui, "note", lambda msg, tag=None: calls.append(("note", msg, tag)))
+        monkeypatch.setattr(ui, "warn", lambda msg: calls.append(("warn", msg)))
+
+        events = [
+            StreamStart(),
+            ReasoningDelta("思考"),
+            TextDelta("正文"),
+            ToolCallStart("read_file", "{}"),
+            ToolCallResult("read_file", "ok"),
+            Usage(1, 2, 3, 4),
+            Note("已瘦身", tag="compact"),
+            Warn("警告"),
+            StreamFinished([{"role": "assistant", "content": "x"}], None),
+            TurnEnd(),
+        ]
+        ui.consume_quiet(iter(events))
+
+        assert calls == [
+            ("tool_call", "read_file", "{}"),
+            ("tool_result", "ok"),
+            ("note", "已瘦身", "compact"),
+            ("warn", "警告"),
+        ]
