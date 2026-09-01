@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "category": "implement",
+  "difficulty": "easy",
+  "judge": "graded",
+  "rubric": "按测试用例通过比例给分：支持 dict 点分路径、list 索引、缺省值、异常输入容错。"
+}
