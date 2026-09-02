@@ -69,8 +69,8 @@ class TestToolRegistry:
 
     def test_search_tools_empty_extended_gives_guidance(self, clean_tools):
         """没有可发现工具时返回明确指引而非空列表（空列表会让模型以为检索失败）。"""
-        # 真实注册表常驻 3 个可发现工具（search_history/todo × 2），先移除模拟空档
-        for name in ("search_history", "todo_write", "todo_read"):
+        # 真实注册表常驻 4 个可发现工具（search_history/todo × 2/spawn_subagent），先移除模拟空档
+        for name in ("search_history", "todo_write", "todo_read", "spawn_subagent"):
             TOOLS.pop(name)
         assert "没有额外的可发现工具" in TOOLS["search_tools"]()
 
@@ -81,7 +81,7 @@ class TestToolRegistry:
             return "ok"
 
         names = {s["function"]["name"] for s in json.loads(TOOLS["search_tools"]())}
-        assert names == {"search_history", "todo_write", "todo_read", "demo_extended2"}
+        assert names == {"search_history", "todo_write", "todo_read", "spawn_subagent", "demo_extended2"}
         assert "read_file" not in names  # 常驻四件套绝不在可发现档
 
     def test_core_four_resident_others_discoverable(self):
@@ -89,12 +89,12 @@ class TestToolRegistry:
         resident = {s["function"]["name"] for s in get_resident_tool_schemas()}
         extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
         assert resident == {"search_tools", "read_file", "write_file", "edit_file", "run_bash"}
-        assert extended == {"search_history", "todo_write", "todo_read"}
+        assert extended == {"search_history", "todo_write", "todo_read", "spawn_subagent"}
 
     def test_business_tools_registered(self):
         """导入 tools 后核心业务工具全部注册（防装饰器被误删）。"""
         for name in ("read_file", "write_file", "edit_file", "run_bash",
-                     "todo_write", "todo_read", "search_tools"):
+                     "todo_write", "todo_read", "search_tools", "spawn_subagent"):
             assert name in TOOLS
 
 

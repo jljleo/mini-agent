@@ -68,6 +68,14 @@ def get_resident_tool_schemas() -> list[dict]:
     return [TOOLS[name].tool_schema for name in RESIDENT_TOOL_NAMES]
 
 
+def get_tool_schemas(names: tuple[str, ...] | list[str]) -> list[dict]:
+    """按给定名字列表生成工具声明（子 agent 受限工具集等场景用）。
+
+    写错名字当场 KeyError（fail fast）。
+    """
+    return [TOOLS[name].tool_schema for name in names]
+
+
 def get_extended_tool_schemas() -> list[dict]:
     """可发现工具声明：已注册但不在常驻名单内的（search_tools 检索后注入）。"""
     return [fn.tool_schema for name, fn in TOOLS.items()

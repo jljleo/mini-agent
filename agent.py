@@ -35,6 +35,7 @@ from config import (
     BASE_URL,
     MAX_SAME_TOOL_CALLS,
     MODEL,
+    SUBAGENT_HIDDEN_TOOLS,
     SYSTEM_MESSAGES,
     SESSION_FILE,
     TOOL_RESULT_PREVIEW_LEN,
@@ -77,9 +78,13 @@ def load_saved_session() -> dict | None:
 
 
 class ChatSession:
-    """一轮完整的多轮对话会话：封装 messages 与 client，避免全局状态。"""
+    """一轮完整的多轮对话会话：封装 messages 与 client，避免全局状态。
 
-    def __init__(self) -> None:
+    tools: 工具声明列表（默认 None = 用全局 BASE_TOOLS 常驻名单）。子 agent 场景
+    传入受限工具集实现权限收窄。depth: 嵌套深度（0 = 主 agent，>0 = 子 agent）。
+    """
+
+    def __init__(self, tools: list[dict] | None = None, depth: int = 0) -> None:
         self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
@@ -88,6 +93,9 @@ class ChatSession:
         # token 仪表盘：会话累计消耗
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+        # 子 agent 支持：可注入的工具集与嵌套深度
+        self.tools = tools if tools is not None else BASE_TOOLS
+        self.depth = depth
 
     def status_text(self) -> str:
         """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。"""
@@ -235,7 +243,7 @@ class ChatSession:
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
                     # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
                     messages=payload,
-                    tools=BASE_TOOLS,  # 发现入口 + 常驻四件套（模块级预计算）
+                    tools=self.tools,  # 当前会话的工具声明（子 agent 可注入受限集）
                     stream=True,
                     stream_options={"include_usage": True}
                 )
@@ -364,9 +372,13 @@ class ChatSession:
                     )
 
                     # search_tools 被调用后，注入可发现工具声明（Moonshot 动态加载机制），幂等。
-                    # 当前没有可发现工具时不注入（空声明消息只会白占上下文）
-                    if (name == "search_tools" and get_extended_tool_schemas()
-                            and not self._tools_already_injected()):
-                        self.messages.append(
-                            {"role": "system", "tools": get_extended_tool_schemas()}
-                        )
+                    # 当前没有可发现工具时不注入（空声明消息只会白占上下文）。
+                    # 子 agent（depth>0）注入时过滤元工具（spawn/todo），与 tools.search_tools
+                    # 的返回文本过滤是同一道防线的两层：少了这层，声明一旦入史，元工具即可被调用。
+                    if name == "search_tools" and not self._tools_already_injected():
+                        schemas = get_extended_tool_schemas()
+                        if self.depth > 0:
+                            schemas = [s for s in schemas
+                                       if s["function"]["name"] not in SUBAGENT_HIDDEN_TOOLS]
+                        if schemas:
+                            self.messages.append({"role": "system", "tools": schemas})
