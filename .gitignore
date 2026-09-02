@@ -6,3 +6,7 @@ __pycache__/
 session_todos.json
 .session.json
 bench/results/
+# 个人笔记/设计文档：只保留本地，不进仓库
+ROADMAP.md
+AGENT_DESIGN.md
+DESIGN_NOTES.md
