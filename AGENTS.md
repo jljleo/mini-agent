@@ -37,9 +37,3 @@
 - `$web_search` 在 `config.py` 中被刻意禁用，因为 kimi-k3 当前处理内置工具结果会失败；需要联网时用 `run_bash` + `curl`，并先告诉用户要访问的 URL。
 - UI 输出统一走语义化 helper；TTY 使用 `tui.py`（Textual 全屏：输出 viewport + 底部固定 dock，离散事件渲染映射在 `tui_render.py` 纯函数里），管道模式继续用 `ui.py`。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
 - `.session.json`、`.chat_history`、`session_todos.json`、`bench/results/` 都是运行时产物，已 gitignore。
-
-## 设计记忆
-
-- `ROADMAP.md` 是当前实现/状态地图；如果你改了已完成特性或优先级，要同步更新它。
-- `DESIGN_NOTES.md` 记录了血泪教训和回归根因；改 compaction、权限、输入处理、streaming 或 benchmark 前先查它。
-- `AGENT_DESIGN.md` 是外部设计调研；把它当背景原则，不要当任务清单。
