@@ -1,6 +1,7 @@
 /.env
 /.venv/
 __pycache__/
+.DS_Store
 .chat_history
 session_todos.json
 .session.json
