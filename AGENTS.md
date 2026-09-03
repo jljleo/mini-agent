@@ -30,8 +30,8 @@
 - 上下文压缩只做发送时投影：`compact.py` 变换的是消息副本，绝不能改存储历史。必须保留 assistant `tool_calls` 与 tool 消息配对；截断不能制造孤儿 tool 消息。
 - 如果流式响应 `finish_reason == "length"` 且带 tool calls，要整批拒绝执行并补上明确的 tool 结果；半截 arguments 不安全，孤儿 tool calls 会导致 API 400。
 - 交互循环刻意没有硬性最大轮次限制。保险丝是 `config.py` 的 `MAX_SAME_TOOL_CALLS`；无人值守场景的轮次限制应放在调用侧（如 bench、子 agent 的 `max_turns`），不要污染核心循环。
-- 子 agent（`spawn_subagent`）：类型化派生（`config.SUBAGENT_TYPES`——researcher 只读 + 默认沙箱 / coder 可写可跑 + 默认真实项目），进程内新 `ChatSession(tools=类型工具表, depth+1)`，上下文隔离只回结论；`sandbox` 显式参数可覆盖类型默认。子 agent 的 ambiguous bash 命令：researcher 一律硬拒、coder 冒泡给人工审批（带 `[子 agent]` 前缀）；越界路径硬拒绝（不评审不冒泡）。防套娃双保险：类型工具表不含 spawn_subagent + `MAX_SUBAGENT_DEPTH=1`。
-- 命令权限随类型声明（`SUBAGENT_TYPES[*].command_policy`）：researcher=read_only（白名单直通，非白名单确定性硬拒，零 LLM 成本）；coder=human（ambiguous 冒泡给人工审批，带 `[子 agent]` 前缀）。限制的唯一可信来源是 config，不是模型生成的参数。
+- 子 agent（`spawn_subagent`）：类型化派生（`config.SUBAGENT_TYPES`——researcher 只读 / coder 可写可跑），进程内新 `ChatSession(tools=类型工具表, depth+1)`，上下文隔离只回结论；子 agent 直接操作真实项目，安全由工具表 + command_policy + 用户审批保证（沙箱机制已移除）。子 agent 的 bash 命令：researcher 一律硬拒、coder 即使命中 allow 也降级为 ask 冒泡给人工审批（带 `[子 agent]` 前缀）；越界路径硬拒绝（不评审不冒泡）。防套娃双保险：类型工具表不含 spawn_subagent + `MAX_SUBAGENT_DEPTH=1`。
+- 命令权限随类型声明（`SUBAGENT_TYPES[*].command_policy`）：researcher=read_only（白名单直通，非白名单确定性硬拒，零 LLM 成本）；coder=human（allow 也降级为 ask，与 ambiguous 一起冒泡给人工审批，带 `[子 agent]` 前缀）。限制的唯一可信来源是 config，不是模型生成的参数。
 - 防乱派生：`spawn_subagent` 工具描述写死派生纪律（先规划边界、任务自包含、别乱派）；子 agent 运行中被拒的命令/访问计入 `_subagent_context`，达到 `SUBAGENT_DENIAL_LIMIT`（默认 3）即 `control.abort()` 熔断本轮，拒绝次数附在结论里回传主 agent 自我修正。
 - 文件工具是窄接口，围栏限制在 `PROJECT_ROOT`；项目外路径需要确认。`run_bash` 由 `permissions.json` 裁决：`deny > allow > ask`；如果命令包含项目外路径，即使命中 allow 也会降级为 ask。不要用 bash 绕过文件围栏访问项目外路径。
 - `$web_search` 在 `config.py` 中被刻意禁用，因为 kimi-k3 当前处理内置工具结果会失败；需要联网时用 `run_bash` + `curl`，并先告诉用户要访问的 URL。

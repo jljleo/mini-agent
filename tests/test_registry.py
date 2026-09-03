@@ -69,8 +69,8 @@ class TestToolRegistry:
 
     def test_search_tools_empty_extended_gives_guidance(self, clean_tools):
         """没有可发现工具时返回明确指引而非空列表（空列表会让模型以为检索失败）。"""
-        # 真实注册表常驻 4 个可发现工具（search_history/todo × 2/spawn_subagent），先移除模拟空档
-        for name in ("search_history", "todo_write", "todo_read", "spawn_subagent"):
+        # 真实注册表常驻 5 个可发现工具（search_history/todo × 2），先移除模拟空档
+        for name in ("search_history", "todo_write", "todo_read"):
             TOOLS.pop(name)
         assert "没有额外的可发现工具" in TOOLS["search_tools"]()
 
@@ -81,20 +81,22 @@ class TestToolRegistry:
             return "ok"
 
         names = {s["function"]["name"] for s in json.loads(TOOLS["search_tools"]())}
-        assert names == {"search_history", "todo_write", "todo_read", "spawn_subagent", "demo_extended2"}
-        assert "read_file" not in names  # 常驻四件套绝不在可发现档
+        assert names == {"search_history", "todo_write", "todo_read", "demo_extended2"}
+        assert "read_file" not in names  # 常驻工具绝不在可发现档
+        assert "spawn_subagent" not in names  # 子 agent 已常驻，不应再经 search_tools 发现
 
-    def test_core_four_resident_others_discoverable(self):
-        """分档契约：search_tools + read/write/edit_file + run_bash 常驻，其余走发现。"""
+    def test_core_resident_others_discoverable(self):
+        """分档契约：核心业务工具 + 子 agent 工具常驻，其余走发现。"""
         resident = {s["function"]["name"] for s in get_resident_tool_schemas()}
         extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
-        assert resident == {"search_tools", "read_file", "write_file", "edit_file", "run_bash"}
-        assert extended == {"search_history", "todo_write", "todo_read", "spawn_subagent"}
+        assert resident == {"search_tools", "read_file", "write_file", "edit_file", "run_bash", "spawn_subagent", "spawn_researchers"}
+        assert extended == {"search_history", "todo_write", "todo_read"}
 
     def test_business_tools_registered(self):
         """导入 tools 后核心业务工具全部注册（防装饰器被误删）。"""
         for name in ("read_file", "write_file", "edit_file", "run_bash",
-                     "todo_write", "todo_read", "search_tools", "spawn_subagent"):
+                     "todo_write", "todo_read", "search_tools", "spawn_subagent",
+                     "spawn_researchers"):
             assert name in TOOLS
 
 

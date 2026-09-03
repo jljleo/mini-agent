@@ -84,12 +84,14 @@ class ChatSession:
     传入受限工具集实现权限收窄。depth: 嵌套深度（0 = 主 agent，>0 = 子 agent）。
     """
 
-    def __init__(self, tools: list[dict] | None = None, depth: int = 0) -> None:
+    def __init__(self, tools: list[dict] | None = None, depth: int = 0,
+                 set_provider: bool = True) -> None:
         self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
         # 历史检索工具的数据源：存储（而非投影）——被瘦身/截断/摘要/截中的原文都可检索
-        set_history_provider(lambda: self.messages)
+        if set_provider:
+            set_history_provider(lambda: self.messages)
         # token 仪表盘：会话累计消耗
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0

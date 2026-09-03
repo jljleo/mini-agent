@@ -28,28 +28,28 @@ MAX_TIMEOUT = 120  # bash 超时上限（秒）：由代码钳制，不信任模
 
 # --- 子 agent ---
 # 类型化子 agent（pi 的 agents 目录 / opencode 的 subagent_type 同款思想）：
-# "派谁"这个决策本身携带约束——类型决定工具边界与默认沙箱策略。
+# "派谁"这个决策本身携带约束——类型决定工具边界与命令策略。
 # 主 agent 派生时必须想清楚"这个任务需要什么能力才能完成"，而不是甩一个通用 agent。
+# NOTE（2026-09）：沙箱机制已移除。子 agent 直接操作真实项目，隔离完全由
+# SUBAGENT_TYPES 工具表 + command_policy + 用户审批保证。
 SUBAGENT_TYPES = {
     "researcher": {
         # 只读调研：无写工具；bash 给上（grep/find/cat 走 allow 直通，非白名单命令硬拒）
         "tools": ("read_file", "search_tools", "run_bash"),
-        "sandbox": True,
         "command_policy": "read_only",  # 确定性白名单：allow 直通，其余硬拒（零 LLM 成本）
         "description": "只读调研：读代码、搜历史，产出分析结论；不能改文件",
     },
     "coder": {
         # 改代码：可写可跑（bash 越界路径硬拒 + ambiguous 冒泡给人工审批），改动落真实项目靠 git 兜底
         "tools": ("read_file", "write_file", "edit_file", "run_bash", "search_tools"),
-        "sandbox": False,
-        "command_policy": "human",  # allow 直通，deny 硬拒，ask → 冒泡给人工审批（opencode 式：规则 + 人）
+        "command_policy": "human",  # allow 也降级为 ask，deny 硬拒，ask → 冒泡给人工审批（opencode 式：规则 + 人）
         "description": "改代码：读写文件、跑命令；改动落真实项目（git 可恢复）",
     },
 }
-# 子 agent 不可发现的工具：spawn_subagent（防套娃）+ todo × 2（防覆盖主会话清单）。
-# 两处生效：tools.search_tools 返回文本过滤 + agent.py 动态声明注入过滤（depth>0）。
 SUBAGENT_HIDDEN_TOOLS = ("spawn_subagent", "todo_write", "todo_read")
 MAX_SUBAGENT_DEPTH = 1  # 嵌套限深：只允许主 agent 派一级子 agent
+# spawn_researchers 并发上限：模型无依据选择并发度，收敛为配置常量（不对模型暴露）
+SUBAGENT_MAX_PARALLEL = 3
 # 子 agent 拒绝熔断：连续被拒此次数即 abort 本轮（codex GuardianRejectionCircuitBreaker
 # 思路）——反复试探授权 = 边界划错了，掐死止血，结论带回主 agent 自我修正。
 SUBAGENT_DENIAL_LIMIT = 3
@@ -121,6 +121,15 @@ SYSTEM_MESSAGES = [
             "开始某步前标 in_progress，完成立即标 completed。\n"
             "3. 单轮问答、一步能完成的任务不要使用 todo，直接完成。\n"
             "4. 不确定当前进度时，先 todo_read 查看清单再继续。"
+        ),
+    },
+    {
+        "role": "system",
+        "content": (
+            "并发调研优化：当你需要同时调研多个独立的文件、目录或问题时，"
+            "优先使用 spawn_researchers 工具并行派生 researcher 子 agent，"
+            "而不是连续多次调用 read_file 或 run_bash。spawn_researchers 只用于只读调研，"
+            "不能用于写文件或执行会修改项目的命令；需要写操作时仍使用单个 spawn_subagent（coder）顺序执行。"
         ),
     },
 ]

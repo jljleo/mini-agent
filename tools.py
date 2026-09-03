@@ -8,9 +8,9 @@ permissions.json 规则裁决 + 人工审批兜底，且命令中出现项目外
 import json
 import os
 import re
-import shutil
 import subprocess
-import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import ui
 from config import (
@@ -20,14 +20,15 @@ from config import (
     PROJECT_ROOT as _CONFIG_PROJECT_ROOT,
     SUBAGENT_DENIAL_LIMIT,
     SUBAGENT_HIDDEN_TOOLS,
+    SUBAGENT_MAX_PARALLEL,
     SUBAGENT_TYPES,
 )
 from input_utils import confirm
 from tool_registry import TOOLS, get_extended_tool_schemas, get_tool_schemas, tool
 
 # 项目根：文件围栏 / bash cwd 的边界锚点，是模块级可变变量（不是 import 绑定）。
-# 沙箱（spawn_subagent）与 bench 通过临时改它实现隔离：`saved = PROJECT_ROOT` →
-# 指向副本 → 用完还原。config.PROJECT_ROOT 是常量，这里是它的可变副本。
+# bench 通过临时改它实现隔离：`saved = PROJECT_ROOT` → 指向副本 → 用完还原。
+# config.PROJECT_ROOT 是常量，这里是它的可变副本。
 PROJECT_ROOT = _CONFIG_PROJECT_ROOT
 
 
@@ -46,7 +47,8 @@ def search_tools() -> str:
     当前没有可发现工具时明确告知——空列表会让模型困惑（“是不是检索失败了”）。
     本工具在常驻名单内（RESIDENT_TOOL_NAMES），因此自动被可发现档排除，
     无自我引用问题（旧设计需手写 schema 特殊处理，名单制后与普通工具无异）。
-    子 agent 上下文里额外过滤元工具（spawn_subagent 防套娃、todo 防覆盖主清单）。
+    子 agent 上下文里额外过滤元工具（todo_write/todo_read 防覆盖主会话清单；
+    spawn_subagent 已常驻主 agent，子 agent 工具表本就不含它，此处作为冗余兜底）。
     """
     extended = get_extended_tool_schemas()
     if _in_subagent():
@@ -202,25 +204,36 @@ DANGEROUS_PATTERNS = [
     "chmod", "kill", "shutdown", "reboot", "mkfs", "dd ",
 ]
 
-# 子 agent 上下文标记：spawn_subagent 执行期间入栈，run_bash 据此走路由审批（read_only 硬拒 / human 冒泡）
-_subagent_context: list[dict] = []  # 栈结构，支持嵌套（虽然限深 1）
+# 子 agent 上下文标记：spawn_subagent 执行期间入栈，run_bash 据此走路由审批
+# （read_only 硬拒 / human 冒泡）。栈按线程隔离（threading.local），使多个子 agent
+# 可以并发执行而不互相污染各自的上下文（如 spawn_researchers 的并行 researcher）。
+_subagent_context_local = threading.local()
+
+
+def _context_stack() -> list[dict]:
+    """当前线程的子 agent 上下文栈（首次访问时创建）。"""
+    if not hasattr(_subagent_context_local, "stack"):
+        _subagent_context_local.stack = []
+    return _subagent_context_local.stack
 
 
 def _in_subagent() -> bool:
     """当前是否处于子 agent 上下文。"""
-    return len(_subagent_context) > 0
+    return bool(_context_stack())
 
 
 def _subagent_task() -> str:
     """当前子 agent 的任务描述（审批冒泡时作为上下文）。"""
-    return _subagent_context[-1]["task"] if _subagent_context else ""
+    stack = _context_stack()
+    return stack[-1]["task"] if stack else ""
 
 
 def _subagent_command_policy() -> str:
     """当前子 agent 的命令策略（config.SUBAGENT_TYPES 里声明）：read_only（白名单直通，其余硬拒）/ human（ask 冒泡给人工审批）。"""
-    if not _subagent_context:
+    stack = _context_stack()
+    if not stack:
         return "human"  # 防御：无上下文时按默认人工审批处理
-    agent_type = _subagent_context[-1].get("type", "coder")
+    agent_type = stack[-1].get("type", "coder")
     spec = SUBAGENT_TYPES.get(agent_type, {})
     return spec.get("command_policy", "human")
 
@@ -231,9 +244,10 @@ def _record_subagent_denial(reason: str) -> str:
     反复试探授权 = 边界划错了（类型选错 / 环境选错），掐死止血并把次数带回主 agent
     自我修正（codex GuardianRejectionCircuitBreaker 思路）。返回给模型的拒绝文案。
     """
-    if not _subagent_context:
+    stack = _context_stack()
+    if not stack:
         return reason
-    ctx = _subagent_context[-1]
+    ctx = stack[-1]
     ctx["denied"] = ctx.get("denied", 0) + 1
     if ctx["denied"] >= SUBAGENT_DENIAL_LIMIT:
         control = ctx.get("control")
@@ -335,6 +349,11 @@ def run_bash(command: str, timeout: int = 30) -> str:
     # 边界违规是明确事实，不冒泡不评审，直接硬拒绝，并计入拒绝熔断。
     if _in_subagent() and _has_outside_path(command):
         return _record_subagent_denial("子 agent 禁止执行含项目外路径的命令（环境安全边界，不可评审豁免）")
+    # 无沙箱后，coder（human 策略）子 agent 的 allow 命令也降级为 ask：
+    # 环境隔离已不存在，命中白名单时仍需用户确认（带 [子 agent] 前缀）。
+    # researcher（read_only 策略）不受影响：allow 仍直通。
+    if _in_subagent() and verdict == "allow" and _subagent_command_policy() == "human":
+        verdict = "ask"
     # allow 授权的是命令本身，不是越界访问：`cat /etc/hosts` 会绕过文件工具的
     # 路径围栏。命令中出现项目外路径时降级为 ask，由用户把关（与文件工具同一套确认）
     if verdict == "allow" and _has_outside_path(command):
@@ -343,7 +362,7 @@ def run_bash(command: str, timeout: int = 30) -> str:
         if _in_subagent():
             policy = _subagent_command_policy()
             if policy == "read_only":
-                # 确定性白名单：非 allow 即拒（researcher 等只读类型零评审成本）
+                # 确定性白名单：非 allow 即拒（researcher 等只读型子 agent 一律拒绝）
                 return _record_subagent_denial(
                     "该命令不在白名单内，researcher 等只读型子 agent 一律拒绝。"
                     "如需执行，请由主 agent 改用 coder 类型。")
@@ -389,7 +408,17 @@ def set_history_provider(fn) -> None:
 
 
 def get_history_provider():
-    """读取当前历史数据源（spawn_subagent 保存/恢复用——子 ChatSession 构造会覆盖它）。"""
+    """读取当前历史数据源。
+
+    子 agent 上下文存在时，优先返回当前子 agent 会话的 messages provider，
+    保证并发 researcher 各自的 search_history 不会串台。主 agent 场景仍回退到
+    全局 _history_provider（由 ChatSession 构造时注入）。
+    """
+    stack = _context_stack()
+    if stack:
+        session = stack[-1].get("session")
+        if session is not None:
+            return lambda: session.messages
     return _history_provider
 
 
@@ -420,7 +449,8 @@ def search_history(keyword: str, context_chars: int = 200) -> str:
     - 返回片段而非全文：膨胀天然有界，且结果以 tool 消息身份进上下文，被 L3 回收；
     - 一个工具覆盖三层降级（L1/L2/L3/单条上限），不给每层各铺一条恢复管道。
     """
-    if _history_provider is None:
+    provider = get_history_provider()
+    if provider is None:
         return "（历史检索不可用：数据源未注入）"
     context_chars = max(50, min(int(context_chars), 500))
     needle = keyword.lower()
@@ -428,7 +458,7 @@ def search_history(keyword: str, context_chars: int = 200) -> str:
         return "（关键词不能为空）"
 
     hits = []
-    for i, m in enumerate(_history_provider()):
+    for i, m in enumerate(provider()):
         content = str(m.get("content") or "")
         lowered = content.lower()
         pos = 0
@@ -537,21 +567,15 @@ def clear_todo_file() -> None:
         os.remove(TODO_FILE)
 
 
-# ---------- 子 agent：工具化派生 + 上下文隔离 + 沙箱 + 类型化命令策略 ----------
+# ---------- 子 agent：工具化派生 + 上下文隔离 + 类型化命令策略 ----------
 #
-# 设计（opencode 简版，见 AGENT_DESIGN.md #20-23）：
+# 设计（opencode 简版）：
 # - 子 agent = 进程内新 ChatSession，只传 task prompt 不传历史（上下文彻底隔离）
 # - 工具集收窄（SUBAGENT_TOOL_NAMES），search_tools 里元工具不可见（防套娃）
 # - 无人值守 → 硬性轮次上限（MAX_TURNS），到顶 abort 优雅收尾（防孤儿 tool call）
-# - researcher=read_only（白名单直通，其余硬拒）；coder=human（ambiguous 冒泡给人工审批）
-# - sandbox=True（默认）在临时项目副本里干活，改动不落真实项目；
-#   sandbox=False 改真实项目，靠 git 兜底
+# - researcher=read_only（白名单直通，其余硬拒）；coder=human（allow 降级 ask，冒泡给人工审批）
+# - 子 agent 直接操作真实项目，改动靠 git / 用户审批兜底（沙箱机制已移除）
 # - 只回最终结论（最后一条 assistant text），完整轨迹不进主上下文
-
-_SANDBOX_IGNORE = shutil.ignore_patterns(
-    ".venv", ".git", "__pycache__", ".idea", ".pytest_cache", ".env",
-    "bench/results", "*.pyc", ".session.json", ".chat_history", "session_todos.json",
-)
 
 _SUBAGENT_DISCIPLINE = (
     "你是被主 agent 派生的子 agent，正在独立执行一个受限子任务。纪律：\n"
@@ -561,6 +585,97 @@ _SUBAGENT_DISCIPLINE = (
 )
 
 
+def _run_single_subagent(task: str, agent_type: str, max_turns: int,
+                         depth: int | None = None) -> dict:
+    """运行单个子 agent 会话，返回结构化结果。
+
+    返回字典：{
+        "final": 最后 assistant 正文,
+        "hit_limit": 是否触发轮次上限,
+        "interrupted": 是否被中断,
+        "denied_count": 被拒次数,
+        "error": 异常文本（无异常为 None）,
+    }
+    由 spawn_subagent / spawn_researchers 共享。
+    """
+    from agent import ChatSession  # 延迟导入：避免 tools ↔ agent 循环依赖
+    from events import StreamStart, TurnControl, TurnEnd
+
+    if depth is None:
+        depth = len(_context_stack())
+
+    spec = SUBAGENT_TYPES[agent_type]
+    tool_schemas = get_tool_schemas(spec["tools"])
+    discipline = (
+        _SUBAGENT_DISCIPLINE +
+        f"\n4. 你的类型是 {agent_type}：{spec['description']}。不要尝试超出能力边界的操作。"
+    )
+
+    control = TurnControl()
+    session = ChatSession(tools=tool_schemas, depth=depth + 1, set_provider=False)
+    _context_stack().append({
+        "task": task, "depth": depth, "type": agent_type,
+        "denied": 0, "control": control, "session": session,
+    })
+    try:
+        session.messages.append({"role": "system", "content": discipline})
+        rounds = 0
+        hit_limit = False
+        for ev in session.chat(task, control=control):
+            if isinstance(ev, StreamStart):
+                rounds += 1
+                if rounds > max_turns:
+                    control.abort()
+                    hit_limit = True
+            elif isinstance(ev, TurnEnd):
+                break
+
+        final = ""
+        for m in reversed(session.messages):
+            if m.get("role") == "assistant" and m.get("content"):
+                final = m["content"]
+                break
+
+        return {
+            "final": final,
+            "hit_limit": hit_limit,
+            "interrupted": control.interrupt.is_set(),
+            "denied_count": _context_stack()[-1].get("denied", 0),
+            "error": None,
+        }
+    except Exception as e:
+        # 异常路径也带上已发生的拒绝计数，供主 agent 判断边界是否划错
+        stack = _context_stack()
+        denied = stack[-1].get("denied", 0) if stack else 0
+        return {
+            "final": "",
+            "hit_limit": False,
+            "interrupted": False,
+            "denied_count": denied,
+            "error": f"{type(e).__name__}: {e}",
+        }
+    finally:
+        _context_stack().pop()
+
+
+def _format_subagent_result(result: dict, max_turns: int) -> str:
+    """把 _run_single_subagent 的结构化结果格式化为回传文本：备注 + 结论正文。
+
+    spawn_subagent / spawn_researchers 共用，保证中断 / 限轮 / 被拒的标注口径一致。
+    """
+    notes = []
+    if result.get("hit_limit"):
+        notes.append(f"已达轮次上限 {max_turns}，以下是其中途结论")
+    elif result.get("interrupted"):
+        notes.append("子 agent 本轮被中断，未产出完整结论，以下是其中途内容")
+    if result.get("denied_count"):
+        notes.append(f"运行中 {result['denied_count']} 条命令/访问被拒——"
+                     "若子 agent 因此受阻，说明任务边界或类型选错了（如该用 coder 而非 researcher）")
+    note = f"（注意：{'；'.join(notes)}）" if notes else ""
+    body = result.get("final") or "（子 agent 未产出结论）"
+    return f"{note}\n{body}"
+
+
 @tool(
     "spawn_subagent",
     "Spawn a subagent with isolated context for a well-scoped, self-contained subtask. "
@@ -568,12 +683,12 @@ _SUBAGENT_DISCIPLINE = (
     "Delegation discipline: (1) Only use when there is a genuinely independent subtask "
     "or the user explicitly asks for delegation/parallel work; do NOT use for trivial "
     "tasks you can do directly. (2) Before spawning, decide the boundaries first: task "
-    "scope (what exactly to do and what NOT to do), environment (sandbox copy vs real "
-    "project), and action needs (is read-only enough, or does it need write/bash) — then "
-    "pick the agent_type whose boundary fits. (3) The task must be self-contained: the "
-    "subagent sees none of your history, so include all needed context (file paths, "
-    "background, constraints) in `task`. (4) If the subagent reports denied commands, "
-    "your boundary was likely wrong — fix it before re-spawning.",
+    "scope (what exactly to do and what NOT to do) and action needs (is read-only enough, "
+    "or does it need write/bash) — then pick the agent_type whose boundary fits. "
+    "(3) The task must be self-contained: the subagent sees none of your history, so "
+    "include all needed context (file paths, background, constraints) in `task`. "
+    "(4) If the subagent reports denied commands, your boundary was likely wrong — "
+    "fix it before re-spawning.",
     {
         "task": {
             "type": "string",
@@ -584,7 +699,7 @@ _SUBAGENT_DISCIPLINE = (
             "description": (
                 "Which specialized agent to use. This is REQUIRED — decide the boundary "
                 "before delegating. "
-                "'researcher': read-only analysis in a throwaway sandbox (cannot edit files; read-only bash commands like grep/find run directly). "
+                "'researcher': read-only analysis (cannot edit files; read-only bash commands like grep/find run directly). "
                 "'coder': can edit files and run commands in the real project (git-recoverable)."
             ),
         },
@@ -592,23 +707,17 @@ _SUBAGENT_DISCIPLINE = (
             "type": "integer",
             "description": "Hard cap on agent rounds (default 10, max 50).",
         },
-        "sandbox": {
-            "type": "boolean",
-            "description": "Override the type's default: run in a throwaway project copy. "
-                           "Researcher defaults to true, coder defaults to false.",
-        },
     },
     ["task", "agent_type"],
 )
-def spawn_subagent(task: str, agent_type: str, max_turns: int = 10,
-                   sandbox: bool | None = None) -> str:
+def spawn_subagent(task: str, agent_type: str, max_turns: int = 10) -> str:
     """派生子 agent 执行独立子任务：上下文隔离 + 类型化工具边界 + 轮次上限 + 类型化命令策略。
 
     只回最终结论（最后一条 assistant 正文），完整轨迹不进主上下文。
     """
     # 嵌套限深：保险丝。子 agent 的工具集本就不含 spawn_subagent（search_tools 也过滤），
     # 这是双保险——防未来误配置导致无限套娃。
-    if len(_subagent_context) >= MAX_SUBAGENT_DEPTH:
+    if len(_context_stack()) >= MAX_SUBAGENT_DEPTH:
         return (
             f"错误：子 agent 嵌套已达上限（MAX_SUBAGENT_DEPTH={MAX_SUBAGENT_DEPTH}）。"
             "请直接自行完成该任务，不要再派生。"
@@ -618,85 +727,82 @@ def spawn_subagent(task: str, agent_type: str, max_turns: int = 10,
     if spec is None:
         available = "、".join(f"{k}（{v['description']}）" for k, v in SUBAGENT_TYPES.items())
         return f"错误：未知子 agent 类型 '{agent_type}'。可用类型：{available}"
-    if sandbox is None:
-        sandbox = spec["sandbox"]  # 沙箱默认值随类型：researcher 隔离、coder 落真实项目
 
-    from agent import ChatSession  # 延迟导入：避免 tools ↔ agent 循环依赖
-    from events import StreamStart, TurnControl, TurnEnd
-
-    global PROJECT_ROOT
     max_turns = max(1, min(int(max_turns), 50))
-    depth = len(_subagent_context)
+    result = _run_single_subagent(task, agent_type, max_turns)
+    if result["error"]:
+        return f"子 agent 执行异常：{result['error']}"
 
-    # 环境准备：沙箱模式 = 项目副本（.venv/.git 等大件不复制，跑不了项目自身测试——
-    # 需要跑测试的子任务应用 coder 类型，sandbox 默认 False）
-    sandbox_dir = None
-    saved_root = PROJECT_ROOT
-    saved_history_provider = get_history_provider()  # 子 ChatSession 构造会覆盖它
-    if sandbox:
-        sandbox_dir = tempfile.mkdtemp(prefix="subagent_")
-        shutil.copytree(PROJECT_ROOT, sandbox_dir, dirs_exist_ok=True, ignore=_SANDBOX_IGNORE)
-        PROJECT_ROOT = sandbox_dir
+    return f"[子 agent 结论]{_format_subagent_result(result, max_turns)}"
 
-    # control 存进上下文：拒绝熔断要在 run_bash 里 abort 本轮，需要拿到子 agent 的控制通道
-    control = TurnControl()
-    _subagent_context.append({"task": task, "depth": depth, "type": agent_type,
-                              "denied": 0, "control": control})
-    session = None
-    hit_limit = False
-    denied_count = 0
-    try:
-        session = ChatSession(tools=get_tool_schemas(spec["tools"]), depth=depth + 1)
-        session.messages.append({"role": "system", "content": (
-            _SUBAGENT_DISCIPLINE +
-            f"\n4. 你的类型是 {agent_type}：{spec['description']}。不要尝试超出能力边界的操作。"
-        )})
 
-        rounds = 0
-        for ev in session.chat(task, control=control):
-            if isinstance(ev, StreamStart):
-                rounds += 1
-                if rounds > max_turns:
-                    # 硬性轮次上限：abort 让内核优雅收尾（补孤儿 tool 结果、产 TurnEnd），
-                    # 而不是直接弃流（会留半截 tool 配对，下次请求 400）
-                    control.abort()
-                    hit_limit = True
-            elif isinstance(ev, TurnEnd):
-                break
-    except Exception as e:
-        return f"子 agent 执行异常：{type(e).__name__}: {e}"
-    finally:
-        entry = _subagent_context.pop()
-        denied_count = entry.get("denied", 0)
-        PROJECT_ROOT = saved_root
-        set_history_provider(saved_history_provider)
-        if sandbox_dir:
+@tool(
+    "spawn_researchers",
+    "Spawn multiple researcher subagents in parallel for independent read-only "
+    "investigation tasks. Each task gets its own isolated context and tool set. "
+    "Use this when you need to investigate several files, directories, or questions "
+    "at once; do NOT use it for tasks that require writing files or running "
+    "non-read-only bash commands. All spawned researchers are read-only: any "
+    "write attempt or non-whitelisted bash command will be hard-denied.",
+    {
+        "tasks": {
+            "type": "array",
+            "description": "List of independent read-only research tasks. Each task must be self-contained.",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": 5,
+        },
+        "max_turns": {
+            "type": "integer",
+            "description": "Hard cap on agent rounds per researcher (default 10, max 50).",
+        },
+    },
+    ["tasks"],
+)
+def spawn_researchers(tasks: list[str], max_turns: int = 10) -> str:
+    """并行派生多个只读 researcher 子 agent，返回合并结论。
+
+    设计约束：
+    - 仅支持 researcher 类型，内部硬编码，禁止写操作与非白名单命令。
+    - 每个 researcher 在独立线程中运行，拥有自己的线程局部上下文栈和
+      history provider，互不污染。
+    - 任务之间相互隔离：一个失败不影响其他任务的结论返回。
+    - 并发度由 config.SUBAGENT_MAX_PARALLEL 决定，不对模型暴露（模型无依据选择并发度）。
+    """
+    # 嵌套限深：只允许主 agent 派生一级子 agent（与 spawn_subagent 一致）
+    if len(_context_stack()) >= MAX_SUBAGENT_DEPTH:
+        return (
+            f"错误：子 agent 嵌套已达上限（MAX_SUBAGENT_DEPTH={MAX_SUBAGENT_DEPTH}）。"
+            "请直接自行完成该任务，不要再派生。"
+        )
+
+    if not tasks:
+        return "错误：tasks 至少包含一个任务。"
+
+    max_turns = max(1, min(int(max_turns), 50))
+    depth = len(_context_stack())
+    max_workers = max(1, min(len(tasks), SUBAGENT_MAX_PARALLEL))
+
+    def run_one(index: int, task: str) -> tuple[int, dict]:
+        return index, _run_single_subagent(task, "researcher", max_turns, depth=depth)
+
+    # 按原始任务下标回填：重复的任务字符串也不会互相覆盖，输出顺序与输入一致
+    results: list[dict] = [{}] * len(tasks)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {executor.submit(run_one, i, task): i for i, task in enumerate(tasks)}
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
             try:
-                shutil.rmtree(sandbox_dir)
-            except OSError as e:
-                ui.warn(f"子 agent 沙箱清理失败（{sandbox_dir}）：{e}，可手动删除")
+                _, result = future.result()
+            except Exception as e:  # 防御：_run_single_subagent 已自捕异常，这里只是兜底
+                result = {"error": f"{type(e).__name__}: {e}", "final": ""}
+            results[index] = result
 
-    # 只回结论：取子 agent 最后一条有正文的 assistant 消息（取"最后文本"与 opencode
-    # findLast(text) 同款，防上下文污染）。注意：中断/熔断时尾部是 tool 补结果消息，
-    # 反遍历跳过它们；但被 abort 时找到的是"半截话"而非终稿，须用 interrupted 标注。
-    final = ""
-    for m in reversed(session.messages):
-        if m.get("role") == "assistant" and m.get("content"):
-            final = m["content"]
-            break
-
-    # opencode 在取 text 前先判失败（assistant error / tool error）→ Effect.fail。
-    # 我们事件流无 part 状态机，用 control.interrupt 标志等价识别"未正常走完"。
-    interrupted = control.interrupt.is_set()
-
-    notes = []
-    if hit_limit:
-        notes.append(f"已达轮次上限 {max_turns}，以下是其中途结论")
-    elif interrupted:
-        notes.append("子 agent 本轮被中断，未产出完整结论，以下是其中途内容")
-    if denied_count:
-        notes.append(f"运行中 {denied_count} 条命令/访问被拒——若子 agent 因此受阻，"
-                     "说明任务边界或类型选错了（如该用 coder 而非 researcher，或该 sandbox=False）")
-    note = f"（注意：{'；'.join(notes)}）" if notes else ""
-    body = final or "（子 agent 未产出结论）"
-    return f"[子 agent 结论]{note}\n{body}"
+    output = ["[子 agent 结论汇总]"]
+    for task, result in zip(tasks, results):
+        if result.get("error"):
+            body = f"[异常] {result['error']}"
+        else:
+            body = f"[结论]{_format_subagent_result(result, max_turns)}"
+        output.append(f"### {task}\n{body}")
+    return "\n\n".join(output)

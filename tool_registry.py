@@ -57,7 +57,7 @@ def tool(name: str, description: str, properties: dict, required: list[str] | No
 
 # 常驻名单：分档的唯一事实来源。只放名字（不 import tools），registry 不依赖业务模块。
 # search_tools 在名单内：发现入口必须常驻，且借此自动被可发现档排除（防自我引用）
-RESIDENT_TOOL_NAMES = ("search_tools", "read_file", "write_file", "edit_file", "run_bash")
+RESIDENT_TOOL_NAMES = ("search_tools", "read_file", "write_file", "edit_file", "run_bash", "spawn_subagent", "spawn_researchers")
 
 
 def get_resident_tool_schemas() -> list[dict]:
