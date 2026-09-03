@@ -5,6 +5,9 @@
 
 import asyncio
 
+from events import Note, ToolCallResult, ToolCallStart, TurnControl, TurnEnd, Usage, Warn
+from tui_render import render_event
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -16,8 +19,6 @@ def test_textual_dependency_available():
     assert textual.__version__
 
 
-from events import Note, ToolCallResult, ToolCallStart, Usage, Warn
-from tui_render import render_event
 
 
 def test_split_complete_freezes_completed_blocks_only():
@@ -71,7 +72,6 @@ def test_render_note_warn_usage_as_plain_text():
     assert "累计 18" in usage.plain
 
 
-from events import TurnControl
 
 
 class FakeSession:

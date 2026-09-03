@@ -11,9 +11,8 @@
 
 import sys
 
-import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
 import commands  # noqa: F401  集中式注册：导入即触发 @command 注册
-
+import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
 import ui
 from agent import ChatSession
 from bridge import run_in_thread
@@ -62,7 +61,7 @@ def _pipe_loop(session: ChatSession) -> None:
         # 线程桥：内核在 worker 线程跑，主线程消费事件。单击 Ctrl+C = 优雅中断
         # （bridge 自动置 interrupt）；双击 = 放弃本轮并退出进程（内核可能卡死，
         # 进程死亡是唯一干净的边界，不存档防写入半截状态，/resume 可恢复上次存档）
-        events, _control = run_in_thread(lambda c: session.chat(question, control=c))
+        events, _control = run_in_thread(lambda c, q=question: session.chat(q, control=c))
         try:
             ui.consume(events)
             session.save()

@@ -206,7 +206,7 @@ class StreamRenderer:
         self._reasoning_shown = 0
         self._reasoning_truncated = False
 
-    def __enter__(self) -> "StreamRenderer":
+    def __enter__(self) -> StreamRenderer:
         if self._live_ok:
             self._status = console.status("[faint]思考中…[/]", spinner="dots")
             self._status.start()

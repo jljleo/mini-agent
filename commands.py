@@ -11,9 +11,18 @@ from rich.table import Table
 
 import ui
 from agent import ChatSession, load_saved_session
-from command_registry import command, COMMANDS
-from compact import apply_message_cap, detect_slim_targets, apply_slimming, estimate_total_tokens, detect_truncation_point, \
-    summarize_middle, extract_middle, apply_truncation, current_chars_per_token
+from command_registry import COMMANDS, command
+from compact import (
+    apply_message_cap,
+    apply_slimming,
+    apply_truncation,
+    current_chars_per_token,
+    detect_slim_targets,
+    detect_truncation_point,
+    estimate_total_tokens,
+    extract_middle,
+    summarize_middle,
+)
 from config import QUIT_COMMANDS, SESSION_FILE, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
 from tools import clear_todo_file

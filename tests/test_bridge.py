@@ -6,7 +6,8 @@ bridge 是内核生成器与主线程之间的队列通道——它的契约是�
 
 import queue
 
-import bridge
+import pytest
+
 from bridge import run_in_thread
 from events import Note, TurnEnd
 
@@ -33,7 +34,7 @@ class TestEventDelivery:
         events, _ = run_in_thread(factory)
         try:
             list(events)
-            assert False, "异常应传播到消费者"
+            pytest.fail("异常应传播到消费者")
         except ValueError as e:
             assert "boom" in str(e)
 
@@ -76,7 +77,7 @@ class TestCtrlCBecomesInterrupt:
         events, control = run_in_thread(factory)
         try:
             next(events)
-            assert False, "双击 Ctrl+C 应抛出 KeyboardInterrupt"
+            pytest.fail("双击 Ctrl+C 应抛出 KeyboardInterrupt")
         except KeyboardInterrupt:
             pass
         assert control.interrupt.is_set()

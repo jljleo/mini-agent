@@ -24,7 +24,6 @@ from compact import (
     summarize_middle,
 )
 
-
 # ---- 消息构造辅助 ----
 
 def user(text="u" * 100):

@@ -77,7 +77,7 @@ class TestCompact:
         # 造一个超过 LOW 水位（60K tokens ≈ 120K 字符）的历史
         session.messages.append({"role": "user", "content": "最初任务"})
         session.messages.append({"role": "assistant", "content": "首次回应"})
-        for i in range(25):
+        for _i in range(25):
             session.messages.append({"role": "user", "content": "x" * 5000})
             session.messages.append({"role": "assistant", "content": "y" * 5000})
 
@@ -96,7 +96,7 @@ class TestCompact:
     def test_summary_failure_falls_back_to_marker(self, session, monkeypatch):
         session.messages.append({"role": "user", "content": "最初任务"})
         session.messages.append({"role": "assistant", "content": "首次回应"})
-        for i in range(25):
+        for _i in range(25):
             session.messages.append({"role": "user", "content": "x" * 5000})
             session.messages.append({"role": "assistant", "content": "y" * 5000})
 

@@ -12,6 +12,7 @@ import pytest
 import config
 import tools
 from events import StreamStart, TurnEnd
+from tool_registry import TOOLS
 
 
 @pytest.fixture
@@ -50,8 +51,8 @@ def _fake_session_cls(conclusions=None, on_chat=None):
 
 def test_spawn_researchers_registered_in_tool_registry(clean_subagent_context):
     """spawn_researchers 应被 @tool 注册到全局 TOOLS。"""
-    assert "spawn_researchers" in tools.TOOLS
-    schema = tools.TOOLS["spawn_researchers"].tool_schema
+    assert "spawn_researchers" in TOOLS
+    schema = TOOLS["spawn_researchers"].tool_schema
     props = schema["function"]["parameters"]["properties"]
     assert "tasks" in props
     assert props["tasks"]["type"] == "array"
@@ -138,7 +139,9 @@ def test_spawn_researchers_does_not_pollute_global_history_provider(clean_subage
     fake_cls = _fake_session_cls()
     monkeypatch.setattr(agent_module, "ChatSession", fake_cls)
 
-    main_provider = lambda: ["主会话消息"]
+    def main_provider():
+        return ["主会话消息"]
+
     tools.set_history_provider(main_provider)
     tools.spawn_researchers(["x"])
     assert tools.get_history_provider() is main_provider
@@ -167,7 +170,7 @@ def test_spawn_researchers_read_only_policy_applies_per_thread(clean_subagent_co
 
     tools.spawn_researchers(["task1", "task2"])
     assert len(captured) == 2
-    for task, result in captured:
+    for _task, result in captured:
         assert "只读型子 agent 一律拒绝" in result
 
 
@@ -193,8 +196,6 @@ def test_spawn_researchers_max_turns_defaults_and_limits(clean_subagent_context,
     """max_turns 默认 10，可被显式设置，且钳制在 [1, 50]。"""
     import agent as agent_module
 
-    captured = []
-
     class TurnCountingSession:
         def __init__(self, tools=None, depth=0, set_provider=True):
             self.tools = tools
@@ -202,7 +203,7 @@ def test_spawn_researchers_max_turns_defaults_and_limits(clean_subagent_context,
             self.messages = [{"role": "assistant", "content": "ok"}]
 
         def chat(self, task, control=None):
-            for i in range(60):
+            for _i in range(60):
                 if control.interrupt.is_set():
                     break
                 yield StreamStart()

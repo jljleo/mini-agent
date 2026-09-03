@@ -4,7 +4,6 @@
 也让"项目外路径"可以用另一个 tmp 目录构造。
 """
 
-import os
 
 import pytest
 

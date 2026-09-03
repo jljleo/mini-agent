@@ -55,7 +55,7 @@ def interruptible_stream(open_stream, control):
             item = q.get(timeout=0.1)
         except _queue.Empty:
             if control.interrupt.is_set():
-                raise StreamAborted()
+                raise StreamAborted() from None
             continue
         if item is done:
             return

@@ -26,11 +26,11 @@ from textual.message import Message
 from textual.widgets import Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
 
-import ui
 import commands  # noqa: F401  集中式注册：导入即触发 @command 注册（不依赖 main.py 的副作用导入）
+import ui
 from agent import ChatSession
 from command_registry import COMMANDS
-from config import MODEL, PROJECT_ROOT, QUIT_COMMANDS
+from config import MODEL, QUIT_COMMANDS
 from events import (
     Note,
     ReasoningDelta,

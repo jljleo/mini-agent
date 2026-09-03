@@ -8,7 +8,7 @@ import json
 import os
 
 import agent
-from agent import ChatSession, load_saved_session
+from agent import load_saved_session
 from events import Note, StreamFinished, TextDelta, TurnControl, TurnEnd, Warn
 
 
@@ -232,7 +232,7 @@ class TestAutoCompact:
                             canned([{"role": "assistant", "content": "完成"}]))
 
         # 塞一段远超 HIGH 水位（100K tokens）的历史
-        for i in range(60):
+        for _i in range(60):
             session.messages.append({"role": "user", "content": "x" * 5000})
             session.messages.append({"role": "assistant", "content": "y" * 5000})
 

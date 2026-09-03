@@ -17,14 +17,16 @@ from config import (
     MAX_OUTPUT_LEN,
     MAX_SUBAGENT_DEPTH,
     MAX_TIMEOUT,
-    PROJECT_ROOT as _CONFIG_PROJECT_ROOT,
     SUBAGENT_DENIAL_LIMIT,
     SUBAGENT_HIDDEN_TOOLS,
     SUBAGENT_MAX_PARALLEL,
     SUBAGENT_TYPES,
 )
+from config import (
+    PROJECT_ROOT as _CONFIG_PROJECT_ROOT,
+)
 from input_utils import confirm
-from tool_registry import TOOLS, get_extended_tool_schemas, get_tool_schemas, tool
+from tool_registry import get_extended_tool_schemas, get_tool_schemas, tool
 
 # 项目根：文件围栏 / bash cwd 的边界锚点，是模块级可变变量（不是 import 绑定）。
 # bench 通过临时改它实现隔离：`saved = PROJECT_ROOT` → 指向副本 → 用完还原。
@@ -110,7 +112,7 @@ def read_file(path: str, offset: int = 0, limit: int = 10000) -> str:
         raise ValueError("Offset must be non-negative and limit must be positive.")
     if limit > 10_000:  # 10K 字符上限，防大文件灌爆上下文
         raise ValueError("Limit must be less than or equal to 10000.")
-    with open(_resolve_safe_path(path, "read_file"), "r", encoding="utf-8") as f:
+    with open(_resolve_safe_path(path, "read_file"), encoding="utf-8") as f:
         content = f.read()
     total = len(content)
     if offset >= total:
@@ -177,7 +179,7 @@ def write_file(path: str, content: str) -> str:
 )
 def edit_file(path: str, old: str, new: str) -> str:
     full = _resolve_safe_path(path, "edit_file")
-    with open(full, "r", encoding="utf-8") as f:
+    with open(full, encoding="utf-8") as f:
         content = f.read()
 
     preview = old if len(old) <= 50 else old[:50] + "..."
@@ -264,7 +266,7 @@ def _load_rules() -> list[dict]:
     if not os.path.exists(rules_path):
         return []
     try:
-        with open(rules_path, "r", encoding="utf-8") as f:
+        with open(rules_path, encoding="utf-8") as f:
             return json.load(f).get("rules", [])
     except (json.JSONDecodeError, OSError) as e:
         ui.warn(f"permissions.json 解析失败（{e}），本次按空规则表处理")
@@ -556,7 +558,7 @@ def todo_read() -> str:
     """读取当前编码会话的任务列表。文件不存在时返回空清单提示。"""
     if not os.path.exists(TODO_FILE):
         return "（当前没有任务清单）"
-    with open(TODO_FILE, "r", encoding="utf-8") as f:
+    with open(TODO_FILE, encoding="utf-8") as f:
         todos = json.load(f)
     return _render_todos(todos)
 
@@ -799,7 +801,7 @@ def spawn_researchers(tasks: list[str], max_turns: int = 10) -> str:
             results[index] = result
 
     output = ["[子 agent 结论汇总]"]
-    for task, result in zip(tasks, results):
+    for task, result in zip(tasks, results, strict=True):
         if result.get("error"):
             body = f"[异常] {result['error']}"
         else:

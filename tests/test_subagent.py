@@ -12,6 +12,7 @@ import pytest
 import config
 import tools
 from events import StreamFinished, StreamStart, TurnEnd
+from tool_registry import TOOLS
 
 
 @pytest.fixture
@@ -194,7 +195,7 @@ def test_spawn_subagent_result_reports_denials(clean_subagent_context, monkeypat
 
 def test_spawn_subagent_description_has_delegation_discipline():
     """工具描述写死派生纪律（codex 同款）：先规划边界、任务自包含、别乱派。"""
-    schema = tools.TOOLS["spawn_subagent"].tool_schema
+    schema = TOOLS["spawn_subagent"].tool_schema
     desc = schema["function"]["description"]
     assert "self-contained" in desc
     assert "decide the boundaries" in desc
@@ -374,7 +375,9 @@ def test_spawn_subagent_uses_context_local_history_provider(clean_subagent_conte
 
     monkeypatch.setattr(agent_module, "ChatSession", FakeSession)
 
-    main_provider = lambda: ["主会话消息"]
+    def main_provider():
+        return ["主会话消息"]
+
     tools.set_history_provider(main_provider)
 
     # 子 agent 运行期间，get_history_provider 应指向子 session
@@ -412,7 +415,9 @@ def test_spawn_subagent_exception_still_restores_state(clean_subagent_context, m
 
     monkeypatch.setattr(agent_module, "ChatSession", BoomSession)
     real_root = tools.PROJECT_ROOT
-    main_provider = lambda: []
+    def main_provider():
+        return []
+
     tools.set_history_provider(main_provider)
 
     result = tools.spawn_subagent("x", agent_type="coder")

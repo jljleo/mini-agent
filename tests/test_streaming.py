@@ -9,6 +9,8 @@ streaming 本就只用 getattr/属性访问，不依赖真实类型）。
 
 from types import SimpleNamespace
 
+import pytest
+
 from events import ReasoningDelta, StreamFinished, TextDelta, TurnControl
 from streaming import interruptible_stream, stream_and_assemble
 
@@ -162,7 +164,7 @@ class TestInterruptibleStream:
         control.interrupt.set()  # 主侧置旗帜
         try:
             next(source)
-            assert False, "应抛 StreamAborted"
+            pytest.fail("应抛 StreamAborted")
         except StreamAborted:
             pass
         assert _time.monotonic() - t0 < 5, "中断响应应在轮询粒度内，而非等卡死的流"
@@ -178,6 +180,6 @@ class TestInterruptibleStream:
         source = interruptible_stream(broken, control)
         try:
             next(source)
-            assert False
+            pytest.fail("不应到达")
         except ConnectionError:
             pass

@@ -6,7 +6,6 @@
 import json
 
 from events import (
-    ReasoningDelta,
     StreamFinished,
     StreamStart,
     TextDelta,

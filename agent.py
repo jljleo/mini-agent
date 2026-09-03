@@ -19,29 +19,6 @@ import queue
 
 from openai import OpenAI
 
-from events import (
-    Note,
-    StreamFinished,
-    StreamStart,
-    ToolCallResult,
-    ToolCallStart,
-    TurnControl,
-    TurnEnd,
-    Usage,
-    Warn,
-)
-from config import (
-    API_KEY_ENV,
-    BASE_URL,
-    MAX_SAME_TOOL_CALLS,
-    MODEL,
-    SUBAGENT_HIDDEN_TOOLS,
-    SYSTEM_MESSAGES,
-    SESSION_FILE,
-    TOOL_RESULT_PREVIEW_LEN,
-    TRUNCATE_HIGH_TOKENS,
-    TRUNCATE_LOW_TOKENS,
-)
 from compact import (
     apply_message_cap,
     apply_slimming,
@@ -53,8 +30,31 @@ from compact import (
     extract_middle,
     summarize_middle,
 )
-from tool_registry import TOOLS, get_resident_tool_schemas, get_extended_tool_schemas
+from config import (
+    API_KEY_ENV,
+    BASE_URL,
+    MAX_SAME_TOOL_CALLS,
+    MODEL,
+    SESSION_FILE,
+    SUBAGENT_HIDDEN_TOOLS,
+    SYSTEM_MESSAGES,
+    TOOL_RESULT_PREVIEW_LEN,
+    TRUNCATE_HIGH_TOKENS,
+    TRUNCATE_LOW_TOKENS,
+)
+from events import (
+    Note,
+    StreamFinished,
+    StreamStart,
+    ToolCallResult,
+    ToolCallStart,
+    TurnControl,
+    TurnEnd,
+    Usage,
+    Warn,
+)
 from streaming import interruptible_stream, stream_and_assemble
+from tool_registry import TOOLS, get_extended_tool_schemas, get_resident_tool_schemas
 from tools import set_history_provider
 
 # 常驻请求的工具声明：search_tools（发现入口）+ 核心四件套（RESIDENT_TOOL_NAMES）。
@@ -239,7 +239,7 @@ class ChatSession:
                     yield Note("工具循环内上下文超限，已应急截断（L1）", tag="compact")
 
             yield StreamStart()
-            def open_stream():
+            def open_stream(payload=payload):  # 显式绑定当轮投影，防闭包捕获漂移
                 return self.client.chat.completions.create(
                     model=MODEL,
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
