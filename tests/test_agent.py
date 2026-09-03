@@ -224,6 +224,39 @@ class TestInterruptBetweenToolCalls:
         assert isinstance(events[-1], TurnEnd)
 
 
+class TestAutoCompact:
+    def test_high_water_triggers_truncation(self, session, monkeypatch):
+        """轮边界上下文超 HIGH 水位时自动触发 L1/L2 压缩，发送给 API 的 payload 变小。"""
+        stub_chat_network(session, monkeypatch)
+        monkeypatch.setattr(agent, "stream_and_assemble",
+                            canned([{"role": "assistant", "content": "完成"}]))
+
+        # 塞一段远超 HIGH 水位（100K tokens）的历史
+        for i in range(60):
+            session.messages.append({"role": "user", "content": "x" * 5000})
+            session.messages.append({"role": "assistant", "content": "y" * 5000})
+
+        captured = {}
+        original_create = session.client.chat.completions.create
+
+        def capture_create(**kwargs):
+            captured["messages"] = kwargs.get("messages")
+            return original_create(**kwargs)
+
+        monkeypatch.setattr(session.client.chat.completions, "create", capture_create)
+
+        events = list(session.chat("提问"))
+
+        assert isinstance(events[-1], TurnEnd)
+        assert any(isinstance(e, Note) and e.tag == "compact" for e in events), \
+            "应产出 compact 相关 Note 事件"
+        assert "messages" in captured, "应调用 client.create"
+        assert len(captured["messages"]) < len(session.messages), \
+            "发送给 API 的 payload 应被压缩"
+        assert all(m.get("role") != "tool" or m.get("content") != "" for m in captured["messages"]), \
+            "不应出现空内容 tool 消息"
+
+
 class TestSteering:
     def test_steer_message_injected_at_turn_boundary(self, session, monkeypatch):
         """steering：运行中插话在轮边界 drain，作为 user 消息注入历史。"""
