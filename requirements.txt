@@ -1,5 +1,5 @@
-openai
-python-dotenv
-prompt_toolkit
-rich
+openai>=1.0
+python-dotenv>=1.0
+prompt_toolkit>=3.0
+rich>=13.0
 textual>=0.86

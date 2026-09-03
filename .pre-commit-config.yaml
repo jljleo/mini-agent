@@ -1,0 +1,10 @@
+# 提交前自动检查：ruff lint（自动修复）
+# 安装：pip install pre-commit && pre-commit install
+# 注：刻意不含 ruff-format——仓库现有手工排版（中文注释对齐、刻意折行），
+# 全量格式化会改写 31 个文件；如将来决定统一排版，一次性跑 ruff format 后再加回该钩子。
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff
+        args: [--fix]

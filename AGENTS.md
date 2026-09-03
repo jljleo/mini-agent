@@ -14,7 +14,7 @@
 - 运行单个测试文件：`.venv/bin/python -m pytest tests/test_compact.py -q`
 - 运行单个测试：`.venv/bin/python -m pytest tests/test_compact.py::test_name -q`
 - 运行 benchmark：`.venv/bin/python bench/run_bench.py [task_name]`；会访问真实 API，在每个任务独立的临时沙箱里自动批准，并写入 `bench/results/*.json`。
-- 仓库没有配置 lint/typecheck/format 命令；不要臆造必须的命令顺序。
+- Lint：`.venv/bin/ruff check .`（配置在 `pyproject.toml`，规则集 E/F/I/UP/B，E501 行长不查）；pre-commit 钩子可选（`pip install pre-commit && pre-commit install`）。仓库未配置 formatter 与 typecheck，不要臆造必须的命令顺序。
 
 ## 测试规则
 

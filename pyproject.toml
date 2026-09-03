@@ -1,0 +1,15 @@
+# 工具配置（依赖仍由 requirements.txt 管理，本文件不放项目元数据）
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+# E pycodestyle / F pyflakes / I isort / UP pyupgrade / B bugbear
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # 行长：大量中文注释/字符串，交给 ruff-format 而非 lint
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agent", "bench", "command_registry", "commands", "compact", "config", "events", "input_utils", "judge", "streaming", "tool_registry", "tools", "trace", "tui", "tui_render", "ui"]
