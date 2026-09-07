@@ -89,7 +89,7 @@ class TestToolRegistry:
         """分档契约：核心业务工具 + 子 agent 工具常驻，其余走发现。"""
         resident = {s["function"]["name"] for s in get_resident_tool_schemas()}
         extended = {s["function"]["name"] for s in tool_registry.get_extended_tool_schemas()}
-        assert resident == {"search_tools", "read_file", "write_file", "edit_file", "run_bash", "spawn_subagent", "spawn_researchers"}
+        assert resident == {"search_tools", "read_file", "write_file", "edit_file", "run_bash", "search_symbols", "spawn_subagent", "spawn_researchers"}
         assert extended == {"search_history", "todo_write", "todo_read"}
 
     def test_business_tools_registered(self):

@@ -35,6 +35,7 @@ from config import (
     BASE_URL,
     MAX_SAME_TOOL_CALLS,
     MODEL,
+    REPO_MAP_MAX_CHARS,
     SESSION_FILE,
     SUBAGENT_HIDDEN_TOOLS,
     SYSTEM_MESSAGES,
@@ -53,6 +54,7 @@ from events import (
     Usage,
     Warn,
 )
+from repo_map import build_repo_map_cached
 from streaming import interruptible_stream, stream_and_assemble
 from tool_registry import TOOLS, get_extended_tool_schemas, get_resident_tool_schemas
 from tools import set_history_provider
@@ -89,6 +91,15 @@ class ChatSession:
         self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
+        # 代码库地图注入：项目结构/核心符号一览（aider 式）。作为一条 system 消息
+        # 追加在模板后——compact 的头部保留区会保留它，不会被截断。生成失败静默
+        # 跳过（地图是增强，不是依赖）；模块级缓存避免每个会话重复扫描。
+        try:
+            repo_map_text = build_repo_map_cached(max_chars=REPO_MAP_MAX_CHARS)
+            if repo_map_text:
+                self.messages.append({"role": "system", "content": repo_map_text})
+        except Exception:
+            pass
         # 历史检索工具的数据源：存储（而非投影）——被瘦身/截断/摘要/截中的原文都可检索
         if set_provider:
             set_history_provider(lambda: self.messages)

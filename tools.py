@@ -12,6 +12,7 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import repo_map
 import ui
 from config import (
     MAX_OUTPUT_LEN,
@@ -58,6 +59,32 @@ def search_tools() -> str:
     if not extended:
         return "（当前没有额外的可发现工具，请直接使用已声明的工具）"
     return json.dumps(extended, ensure_ascii=False)
+
+
+# ---------- 代码库感知：search_symbols（repo_map.py 的数据层）----------
+
+
+@tool(
+    "search_symbols",
+    "Search for code symbols (classes, functions, methods, imports, constants) "
+    "across the codebase by name. Use this to locate code instead of blind "
+    "read_file + grep. Returns matches with file:line, kind and reference count "
+    "(how many places reference it, higher = more core).",
+    {
+        "query": {
+            "type": "string",
+            "description": "Substring to match against symbol names (case-insensitive).",
+        },
+        "kind": {
+            "type": "string",
+            "description": "Optional filter: class / function / method / import / constant.",
+        },
+    },
+    ["query"],
+)
+def search_symbols(query: str, kind: str | None = None) -> str:
+    """按名称检索代码符号。只读、围栏内（索引本项目源码），无需确认。"""
+    return repo_map.search_symbols(PROJECT_ROOT, query, kind)
 
 
 # ---------- 文件窄接口工具：路径围栏 + 免确认 ----------
@@ -573,8 +600,9 @@ def clear_todo_file() -> None:
 #
 # 设计（opencode 简版）：
 # - 子 agent = 进程内新 ChatSession，只传 task prompt 不传历史（上下文彻底隔离）
-# - 工具集收窄（SUBAGENT_TOOL_NAMES），search_tools 里元工具不可见（防套娃）
-# - 无人值守 → 硬性轮次上限（MAX_TURNS），到顶 abort 优雅收尾（防孤儿 tool call）
+# - 工具表按类型收窄（config.SUBAGENT_TYPES[*].tools），search_tools 里元工具不可见
+#   （SUBAGENT_HIDDEN_TOOLS 过滤，防套娃）
+# - 无人值守 → 硬性轮次上限（max_turns 参数，默认 10/上限 50），到顶 abort 优雅收尾（防孤儿 tool call）
 # - researcher=read_only（白名单直通，其余硬拒）；coder=human（allow 降级 ask，冒泡给人工审批）
 # - 子 agent 直接操作真实项目，改动靠 git / 用户审批兜底（沙箱机制已移除）
 # - 只回最终结论（最后一条 assistant text），完整轨迹不进主上下文

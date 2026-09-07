@@ -86,6 +86,11 @@ SINGLE_MSG_CAP_CHARS = 60_000
 # 触发与 L1 同高水位：到线后先尝试让模型压缩中段，失败再回退硬切。
 SUMMARIZE_MAX_CHARS = 150_000  # 摘要输入上限：中段超长时只取靠后部分（更贴近当前任务）
 
+# --- 代码库感知（repo_map.py）---
+# repo map 注入 system prompt 的字符预算（约 3000 字符 ≈ 1.5K tokens），
+# 超预算截断，头部保留最高重要性文件/符号；明细靠 search_symbols 惰性取。
+REPO_MAP_MAX_CHARS = 3000
+
 # --- 项目路径 ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历史（跨会话）
