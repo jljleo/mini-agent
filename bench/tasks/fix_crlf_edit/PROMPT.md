@@ -4,5 +4,6 @@
 
 请修复 `apply_discount`，要求：
 - `apply_discount(100, 10) == 90`，`apply_discount(200, 25) == 150`，`apply_discount(50, 0) == 50`
-- 用 edit_file 工具修改（不要整个文件重写）
-- 不要改变文件的行尾风格（保持与 read_file 看到的一致）
+- **修改文件只能用 edit_file 工具**：不得使用 run_bash（sed/perl/python 写入等）或任何
+  其它方式直接改写文件内容——必须通过 edit_file 完成修复
+- 不要重写整个文件：用精确替换改 get 到的那一处

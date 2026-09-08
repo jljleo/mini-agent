@@ -186,27 +186,6 @@ def write_file(path: str, content: str) -> str:
     return f"Content written to {path}"
 
 
-@tool(
-    "edit_file",
-    "Edit a file by exact text replacement. Paths outside the project directory "
-    "require user confirmation. The old text must appear exactly ONCE in the file; "
-    "on failure, read_file first to check the current content.",
-    {
-        "path": {
-            "type": "string",
-            "description": "The path to the file, relative to the project root. Absolute paths outside the project are allowed but require user confirmation.",
-        },
-        "old": {
-            "type": "string",
-            "description": "The exact text to replace. Must appear exactly ONCE in the file; include enough surrounding context (e.g. a few lines) to make it unique.",
-        },
-        "new": {
-            "type": "string",
-            "description": "The new text to insert.",
-        },
-    },
-    ["path", "old", "new"],
-)
 def _lenient_replace(content: str, old: str, new: str, path: str, preview: str) -> str | None:
     """容错定位：old 逐行 rstrip 后在文件行里找唯一连续子序列。
 
@@ -254,6 +233,27 @@ def _edit_not_found_message(path: str, preview: str, content: str) -> str:
     )
 
 
+@tool(
+    "edit_file",
+    "Edit a file by exact text replacement. Paths outside the project directory "
+    "require user confirmation. The old text must appear exactly ONCE in the file; "
+    "on failure, read_file first to check the current content.",
+    {
+        "path": {
+            "type": "string",
+            "description": "The path to the file, relative to the project root. Absolute paths outside the project are allowed but require user confirmation.",
+        },
+        "old": {
+            "type": "string",
+            "description": "The exact text to replace. Must appear exactly ONCE in the file; include enough surrounding context (e.g. a few lines) to make it unique.",
+        },
+        "new": {
+            "type": "string",
+            "description": "The new text to insert.",
+        },
+    },
+    ["path", "old", "new"],
+)
 def edit_file(path: str, old: str, new: str) -> str:
     """编辑文件：替换唯一出现的 old 为 new。
 
