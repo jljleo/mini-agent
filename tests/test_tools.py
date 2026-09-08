@@ -59,6 +59,19 @@ class TestResolveSafePath:
         with pytest.raises(ValueError, match="用户拒绝了访问项目外路径"):
             _resolve_safe_path(str(outside / "x.txt"), "read_file")
 
+    def test_symlinked_root_inside_free(self, tmp_path, monkeypatch):
+        """PROJECT_ROOT 自身带符号链接（macOS /var → /private/var）时，
+        项目内文件必须免确认——realpath 化根目录修的就是这个误判。"""
+        real = tmp_path / "realproj"
+        real.mkdir()
+        link = tmp_path / "linkproj"
+        link.symlink_to(real, target_is_directory=True)
+        monkeypatch.setattr(tools, "PROJECT_ROOT", str(link))
+        monkeypatch.setattr(tools, "confirm",
+                            lambda *a, **k: pytest.fail("项目内不应触发确认"))
+        p = _resolve_safe_path("a.txt", "read_file")
+        assert p == str(real / "a.txt")
+
     def test_write_marks_dangerous(self, sandbox, monkeypatch):
         _, outside = sandbox
         calls = []
@@ -152,7 +165,7 @@ class TestWriteEdit:
     def test_edit_missing_text_guides_to_read(self, sandbox):
         root, _ = sandbox
         write_file("f.txt", "content")
-        with pytest.raises(ValueError, match="read_file first"):
+        with pytest.raises(ValueError, match="read_file"):
             edit_file("f.txt", "nonexistent", "x")
 
 

@@ -96,9 +96,12 @@ def _resolve_safe_path(path: str, op: str) -> str:
     realpath 防符号链接逃逸。早期设计是越界硬拒绝，但模型会绕过：改用 run_bash
     执行 cat 读外界文件。既然权限系统已有"确认"这一档，围栏外降级为询问用户，
     比硬拒绝更可用、比放任更安全。拒绝时抛 ValueError，由 agent 统一转为工具结果。
+    注意 PROJECT_ROOT 本身也要 realpath 化：macOS 上 /var → /private/var 这类
+    符号链接会让项目内文件被误判越界（bench 靠自动批准掩盖了这一点）。
     """
+    full_root = os.path.realpath(PROJECT_ROOT)
     full_path = os.path.realpath(os.path.join(PROJECT_ROOT, path))
-    if full_path == PROJECT_ROOT or full_path.startswith(PROJECT_ROOT + os.sep):
+    if full_path == full_root or full_path.startswith(full_root + os.sep):
         return full_path
     # 子 agent 上下文不冒泡找人：越界访问直接硬拒绝（环境安全层），计入拒绝熔断
     if _in_subagent():
@@ -204,23 +207,92 @@ def write_file(path: str, content: str) -> str:
     },
     ["path", "old", "new"],
 )
+def _lenient_replace(content: str, old: str, new: str, path: str, preview: str) -> str | None:
+    """容错定位：old 逐行 rstrip 后在文件行里找唯一连续子序列。
+
+    容忍行尾空白/换行差异（CRLF vs LF）、read_file 复制误差——精确匹配命不中时
+    的降级路径。唯一性约束与精确匹配相同（多处拒绝，防误改）；new 永远原样用模型
+    给的文本。返回新内容；未找到返回 None（由调用方给 read_file 指引）；多处抛
+    ValueError。用 splitlines(keepends=True) 保留原文件换行风格（CRLF/LF 都不丢）。
+    """
+    lines = content.splitlines(keepends=True)
+    old_lines = old.replace("\r\n", "\n").split("\n")
+    # old 全为空白/空行时不宽容（空匹配会乱改文件）
+    if not old_lines or all(not ln.strip() for ln in old_lines):
+        return None
+    stripped_all = [ln.rstrip() for ln in lines]
+    stripped_old = [ln.rstrip() for ln in old_lines]
+    n, m = len(stripped_all), len(stripped_old)
+    idcs = [i for i in range(n - m + 1) if stripped_all[i:i + m] == stripped_old]
+    if not idcs:
+        return None
+    if len(idcs) > 1:
+        raise ValueError(
+            f"Old text '{preview}' found {len(idcs)} times in {path} "
+            f"(容错匹配仍多处，见 {idcs[0] + 1} 行与 {idcs[1] + 1} 行); provide more context"
+        )
+    i = idcs[0]
+    # 组装：保留原文件换行风格（CRLF/LF）与行尾语义（是否以换行结尾）
+    block = "".join(lines[i:i + m])
+    crlf = "\r\n" in block
+    eol = "\r\n" if crlf else "\n"
+    new_text = "\n".join(new.replace("\r\n", "\n").split("\n"))
+    if crlf:
+        new_text = new_text.replace("\n", "\r\n")
+    if block.endswith(("\n", "\r\n")) and not new_text.endswith(("\n", "\r\n")):
+        new_text += eol
+    return "".join(lines[:i]) + new_text + "".join(lines[i + m:])
+
+
+def _edit_not_found_message(path: str, preview: str, content: str) -> str:
+    """失败辅助：不是死句，给文件头部预览 + 可执行的 read_file 指引。"""
+    head = "\n".join(content.replace("\r\n", "\n").split("\n")[:5])
+    return (
+        f"Old text '{preview}' not found in {path} "
+        "(已忽略行尾空白/换行差异仍找不到)。文件内容可能已变更——"
+        f"请先 read_file 查看当前内容再编辑。文件头部预览:\n{head}"
+    )
+
+
 def edit_file(path: str, old: str, new: str) -> str:
+    """编辑文件：替换唯一出现的 old 为 new。
+
+    容错策略链（AGENT_DESIGN 13 条）：
+      L1 精确匹配（现状，count==1 直接替换；count>1 拒绝防误改）
+      L2 行级宽容定位（忽略行尾空白/换行差异/stale 行内改动，唯一才替换）
+      L3 失败给 read_file 指引 + 文件预览（文件可能已变更）
+    改后自检（48/49 条）：语法错误零成本回喂，模型当场自愈。
+    """
     full = _resolve_safe_path(path, "edit_file")
-    with open(full, encoding="utf-8") as f:
+    # newline="" 读写保真：默认 universal newline 会把 CRLF 吞成 \n，写回时
+    # 整个文件的换行风格被毁（Git text=crlf 仓库的真实事故）；模型从 read_file
+    # 复制的是归一化视图，L2 容错匹配正好兜住差异。
+    with open(full, encoding="utf-8", newline="") as f:
         content = f.read()
 
     preview = old if len(old) <= 50 else old[:50] + "..."
     count = content.count(old)
-    if count == 0:
+    if count == 1:
+        content = content.replace(old, new, 1)
+    elif count > 1:
         raise ValueError(
-            f"Old text '{preview}' not found in {path}; please read_file first to check the current content")
-    if count > 1:
-        raise ValueError(f"Old text '{preview}' found {count} times in {path}; provide more context to make it unique")
+            f"Old text '{preview}' found {count} times in {path}; provide more context to make it unique")
+    else:
+        lenient = _lenient_replace(content, old, new, path, preview)
+        if lenient is None:
+            raise ValueError(_edit_not_found_message(path, preview, content))
+        content = lenient
 
-    content = content.replace(old, new, 1)
-    with open(full, "w", encoding="utf-8") as f:
+    with open(full, "w", encoding="utf-8", newline="") as f:
         f.write(content)
-    return f"Edited {path}: replaced 1 occurrence"
+
+    result = f"Edited {path}: replaced 1 occurrence"
+    # 改后语法自检：坏代码立即回喂（工具结果附带 consequences，opencode 30 条的轻量版）
+    diags = repo_map.syntax_diagnostics(content, path)
+    if diags:
+        result += ("\n⚠ 语法检查失败（先修复再继续，避免带着错误前行）:\n"
+                   + "\n".join(diags[:5]))
+    return result
 
 
 # 权限规则：permissions.json 是唯一事实来源（原 SAFE_PREFIXES 已迁入）。

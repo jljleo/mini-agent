@@ -693,6 +693,35 @@ def _default_root() -> str:
 
 
 # ---------------------------------------------------------------------------
+# 语法自检（edit_file 改后闭环用的零成本冒烟：opencode 式 diagnostics 的轻量版）
+
+
+def syntax_diagnostics(source: str, relpath: str, limit: int = 5) -> list[str]:
+    """解析源码，返回语法错误列表（空 = 通过）。
+
+    供 edit_file 等在改动文件后做零成本自检：坏代码必然产出 ERROR/MISSING 节点，
+    带行号回喂给模型（49 条「验证信号：编译器/typecheck 优先」的最小形态，
+    模型下一轮就看到自己改坏了，当场自愈）。语言不支持/解析器缺失返回空（不误报）。
+    """
+    root = _parse_root(source, relpath)
+    if root is None:
+        return []
+    errors: list[str] = []
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type == "ERROR" or getattr(n, "is_missing", False):
+            line = n.start_point[0] + 1
+            snippet = (n.text.decode("utf-8", "replace") or "")[:60]
+            errors.append(f"{relpath}:{line} 语法错误：{snippet!r}")
+            if len(errors) >= limit:
+                break
+            continue  # 不深入 ERROR/MISSING 内部（避免重复与海量报错）
+        stack.extend(n.named_children)
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # search_symbols 工具的数据层
 
 
