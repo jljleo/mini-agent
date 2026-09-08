@@ -34,6 +34,7 @@ from compact import (
 from config import (
     API_KEY_ENV,
     BASE_URL,
+    CONTEXT_TOKENS,
     MAX_SAME_TOOL_CALLS,
     MODEL,
     REPO_MAP_MAX_CHARS,
@@ -134,7 +135,7 @@ class ChatSession:
     def status_text(self) -> str:
         """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。"""
         total = self.total_prompt_tokens + self.total_completion_tokens
-        return f"{MODEL} · tokens {total:,}"
+        return f"{MODEL} · ctx {CONTEXT_TOKENS // 1000}K · tokens {total:,}"
 
     # ---- 历史管理 ----
 

@@ -17,7 +17,7 @@ import ui
 from agent import ChatSession
 from bridge import run_in_thread
 from command_registry import COMMANDS
-from config import MODEL, PROJECT_ROOT, QUIT_COMMANDS
+from config import CONTEXT_TOKENS, MODEL, PROJECT_ROOT, QUIT_COMMANDS
 from input_utils import read_input, set_status_provider
 
 
@@ -76,8 +76,8 @@ def _pipe_loop(session: ChatSession) -> None:
 
 def main() -> None:
     session = ChatSession()
-    set_status_provider(session.status_text)  # 管道模式输入区底部状态栏：模型 · token 累计
-    ui.banner(MODEL, PROJECT_ROOT)
+    set_status_provider(session.status_text)  # 管道模式输入区底部状态栏：模型 · 上下文窗口 · token 累计
+    ui.banner(MODEL, PROJECT_ROOT, CONTEXT_TOKENS)
 
     if sys.stdin.isatty():
         import tui  # 延迟导入：管道模式不加载 Textual

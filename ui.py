@@ -93,16 +93,17 @@ def goodbye() -> None:
 # ---- 启动横幅 ----
 
 
-def banner(model: str, cwd: str) -> None:
+def banner(model: str, cwd: str, context_tokens: int | None = None) -> None:
     """启动横幅：品牌 + 关键上下文（模型/目录）+ 最小上手提示。"""
+    ctx = f" · ctx {context_tokens // 1000}K" if context_tokens else ""
     if not console.is_terminal:
-        console.print(f"mini-agent · {model}")
+        console.print(f"mini-agent · {model}{ctx}")
         return
     console.print()
     console.print(
         Panel(
             f"[bold accent]✦ mini-agent[/]\n\n"
-            f"[muted]模型[/]  {escape(model)}\n"
+            f"[muted]模型[/]  {escape(model)}{ctx}\n"
             f"[muted]目录[/]  {escape(cwd)}\n\n"
             f"[faint]输入问题开始对话 · /help 查看命令 · exit / Ctrl+C 退出[/]",
             border_style="faint",

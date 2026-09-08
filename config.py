@@ -9,10 +9,41 @@ from dotenv import load_dotenv
 
 load_dotenv()  # 把 .env 加载进环境变量，API key 不落代码
 
-# --- 模型 ---
-MODEL = "kimi-k3"
-BASE_URL = "https://api.moonshot.cn/v1"
-API_KEY_ENV = "MOONSHOT_API_KEY"  # 从环境变量读 key，不入库
+# --- 模型（多模型档案）---
+# 任何兼容 OpenAI Chat Completions 协议的提供商都能接入：在下面加一行档案即可。
+# 用环境变量 MINI_AGENT_MODEL 选择档案（默认 kimi）。context_tokens 按官方文档填——
+# 它是 L1 截断水位的依据（见下文 TRUNCATE_HIGH_TOKENS）：填小了只是更保守，填大了会爆窗。
+MODEL_PROFILES = {
+    "kimi": {
+        "model": "kimi-k3",
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "context_tokens": 128_000,
+    },
+    "deepseek": {
+        "model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "context_tokens": 64_000,
+    },
+    "qwen": {
+        "model": "qwen-plus",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key_env": "DASHSCOPE_API_KEY",
+        "context_tokens": 131_072,
+    },
+}
+MODEL_PROFILE = os.environ.get("MINI_AGENT_MODEL", "kimi")
+if MODEL_PROFILE not in MODEL_PROFILES:
+    raise SystemExit(
+        f"未知模型档案 {MODEL_PROFILE!r}（MINI_AGENT_MODEL），"
+        f"可选：{', '.join(MODEL_PROFILES)}；新提供商请在 config.MODEL_PROFILES 加一行"
+    )
+_profile = MODEL_PROFILES[MODEL_PROFILE]
+MODEL = _profile["model"]
+BASE_URL = _profile["base_url"]
+API_KEY_ENV = _profile["api_key_env"]  # 从环境变量读 key，不入库
+CONTEXT_TOKENS = _profile["context_tokens"]  # 上下文窗口（截断水位依据 + 状态栏显示）
 
 # --- agent 循环 ---
 # 无硬性轮次上限：交互场景人在看（业界交互模式均不设上限），失控防线是下面的
@@ -73,8 +104,10 @@ SLIM_MIN_SAVINGS_CHARS = 2_000
 # 触发用估算 token（chars//2）：达到高水位才截，一刀切到低水位。
 # 双水位滞后：防“刚好切到阈值下、下轮又超”导致每轮都截、每轮缓存全失效。
 # （按 token 而非消息条数：条数与上下文占用无量纲关系，一条大文件结果可顶几十条闲聊）
-TRUNCATE_HIGH_TOKENS = 100_000  # 硬触发线（kimi-k3 128K 窗口预留输出与余量）
-TRUNCATE_LOW_TOKENS = 60_000  # 截断目标：切完留下足够增长空间
+# 水位随所选模型的上下文窗口走：kimi 128K 窗口 → 100K/60K，与历史调参一致。
+# 低水位按比例（而非固定减量）取：小窗口模型上固定减量会把滞后带扣成负数。
+TRUNCATE_HIGH_TOKENS = CONTEXT_TOKENS - 28_000  # 硬触发线（窗口预留 ~28K 输出与余量）
+TRUNCATE_LOW_TOKENS = int(TRUNCATE_HIGH_TOKENS * 0.6)  # 截断目标：切完留 40% 滞后带增长
 
 # --- 单条体积上限（compact.py，投影级）---
 # 分层防御的“单条体积”层：MAX_OUTPUT_LEN 只管工具产出，user 输入无天然上限——
