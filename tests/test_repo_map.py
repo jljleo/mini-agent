@@ -40,9 +40,11 @@ class TestExtractSymbols:
         assert kinds["Greeter"] == "class"
         assert kinds["__init__"] == "method"
         assert kinds["greet"] == "method"
-        # 方法签名带 async
+        # 统一契约下 sig 留空（细节靠 read_file）；kind/行号仍准确
         greet = next(s for s in syms if s.name == "greet")
-        assert greet.sig.startswith("async def greet")
+        assert greet.kind == "method" and greet.sig == ""
+        top = next(s for s in syms if s.name == "top_level")
+        assert top.kind == "function" and top.line == 3
 
     def test_imports_extracted(self):
         src = "import os\nfrom pathlib import Path\nfrom typing import List\n"
@@ -51,8 +53,11 @@ class TestExtractSymbols:
         assert {"os", "Path", "List"} <= names
         assert all(s.kind == "import" for s in syms)
 
-    def test_syntax_error_returns_empty(self):
-        assert repo_map.extract_symbols("def broken(:\n", "bad.py") == []
+    def test_syntax_error_tolerant(self):
+        """tree-sitter 容错：坏文件也能捞到部分符号（而非整文件丢弃）。"""
+        syms = repo_map.extract_symbols("def broken(:\n", "bad.py")
+        names = {s.name for s in syms}
+        assert "broken" in names  # 容错解析仍识别出函数名
 
     def test_nested_def_not_indexed(self):
         src = "def outer():\n    def inner():\n        pass\n"

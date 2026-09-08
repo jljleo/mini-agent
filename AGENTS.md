@@ -8,7 +8,7 @@
 ## 项目形态
 
 - 扁平的 Python 3.13 CLI agent；有最小 `requirements.txt`（openai / python-dotenv / prompt_toolkit / rich / textual），没有构建步骤、lint 配置或代码生成。使用仓库内虚拟环境：`.venv/bin/python`；新环境先 `.venv/bin/pip install -r requirements.txt`。
-- 代码库感知（repo_map.py）按语言解析：Python 走标准库 ast；js/ts/go/rust/java 走 tree-sitter（按需 lazy import）。语言包装在 `requirements.txt` 里；加新语言 = 在 repo_map.py 注册 `@_extractor(".xxx")` 提取器 + 装对应 tree-sitter-xxx 包，索引/排序/缓存/检索逻辑语言无关无需改动。
+- 代码库感知（repo_map.py）全语言统一走 tree-sitter 解析（lazy import，语言包缺失时该语言静默为空）：python / javascript / typescript(含 tsx) / go / rust / java。加新语言 = 在 repo_map.py 注册 `@_extractor(".xxx")` 提取器 + 装对应 tree-sitter-xxx 包，索引/排序/缓存/检索逻辑语言无关无需改动。
 - 入口是 `main.py`；根据 `sys.stdin.isatty()` 自动选择 TTY 模式（`tui.py` 的 Textual 全屏前端）或管道模式（`_pipe_loop`）。
 - 运行时配置在 `config.py`，会加载 `.env`；真实运行需要 `MOONSHOT_API_KEY`。不要读取或提交 `.env`。
 - 内核/UI 边界很重要：`agent.py`、`streaming.py`、`compact.py` 必须保持为事件生产者，不能 `import ui`。通过产出/消费 `events.py` 事件来渲染或上报（`ui.consume`、bench 消费者）。

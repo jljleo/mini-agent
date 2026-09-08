@@ -1,14 +1,15 @@
-"""代码库感知：符号索引 + repo map 生成（aider 式代码库地图，多语言自研版）。
+"""代码库感知：符号索引 + repo map 生成（aider 式代码库地图，全语言统一 tree-sitter）。
 
 语言适配层 = 提取器注册表（_EXTRACTORS）：每种扩展名对应一个提取函数。
-    - .py 走标准库 ast（零依赖路径，符号精确、容错好）
-    - 其他语言走 tree-sitter（lazy import：解析器与语言包只在仓库出现该语言时才加载，
-      「用到才付」——语言包缺失时该语言提取静默为空，其余语言不受影响）
-索引/排序/缓存/预算/检索逻辑与语言无关，加语言 = 加一个 @_extractor 注册函数。
+全部语言统一走 tree-sitter（lazy import：解析器与语言包只在仓库出现该语言时才加载，
+「用到才付」——语言包缺失时该语言提取静默为空，其余语言不受影响）。
 
 已支持：python / javascript / typescript(含 tsx) / go / rust / java。
-引用计数：.py 用 ast.Name 精确统计（Load 语境）；非 Python 语言用词边界文本计数
-（注释/字符串会高估，但作为重要性排序的入度近似足够，且语言无关）。
+统一契约（无语言特例）：
+    - 符号：class（含 interface/type/struct/trait）+ function + method + import + constant
+    - 引用计数：所有语言数 identifier 叶子节点（注释/字符串是独立节点，天然不计入），
+      定义处也计入（近似「出现次数」，作为重要性入度的排序依据足够且完全一致）
+    - 容错：tree-sitter 增量解析，坏文件出部分树，能捞多少是多少，绝不阻塞索引
 
 对外接口：
     discover_source_files(root)      -> [绝对路径] 项目内待索引源码
@@ -18,12 +19,10 @@
     search_symbols(root, query, kind)-> str 供 search_symbols 工具调用
     build_repo_map_cached()          -> str 全局缓存版（agent 注入用）
 
-纯函数 + 全局缓存；坏文件/缺语言包不阻塞索引。
+纯函数 + 全局缓存（mtime 签名失效）；加语言 = 注册 @_extractor + 对应语言包。
 """
 
-import ast
 import os
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -48,8 +47,8 @@ class Symbol:
     kind: str            # class / function / method / import / constant
     file: str            # 相对项目根的路径
     line: int
-    sig: str = ""        # 如 `def foo(a, b)`（仅 .py 有；多语言留空）
-    references: int = 0  # 被其他符号引用的次数（重要性排序依据）
+    sig: str = ""        # 统一契约下留空（细节靠 read_file）
+    references: int = 0  # 被引用的近似次数（identifier 出现次数，重要性排序依据）
 
     @property
     def label(self) -> str:
@@ -84,6 +83,14 @@ def _extractor(*exts: str):
 
 # ---------------------------------------------------------------------------
 # tree-sitter 通用基座（lazy import：解析器/语言包用到才加载）
+
+
+_LANG_GETTERS: dict[str, callable] = {}  # 扩展名 → 语言 getter（引用计数/解析用）
+
+
+def _register_lang(exts: tuple[str, ...], getter):
+    for ext in exts:
+        _LANG_GETTERS[ext] = getter
 
 
 def _ts_parse(source: str, language_getter) -> object | None:
@@ -126,80 +133,120 @@ def _name_of(node) -> str | None:
     return None
 
 
+def _first_ident(node):
+    """深度优先找第一个标识符叶子（import 取符号名用）。"""
+    stack = [node]
+    while stack:
+        n = stack.pop(0)
+        if n.type in _IDENT_LEAF_TYPES and n.child_count == 0:
+            return n
+        stack.extend(n.named_children)
+    return None
+
+
 # ---------------------------------------------------------------------------
-# Python：标准库 ast（零依赖路径，精确计数）
+# Python
 
 
-def _func_sig(node: ast.AST, is_async: bool = False) -> str:
-    args = []
-    for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
-        args.append(a.arg)
-    if node.args.vararg:
-        args.append("*" + node.args.vararg.arg)
-    if node.args.kwarg:
-        args.append("**" + node.args.kwarg.arg)
-    head = "async def" if is_async else "def"
-    return f"{head} {node.name}({', '.join(args)})"[:80]
+_PY_LITERAL_TYPES = {
+    "integer", "float", "string", "concatenated_string", "bytes",
+    "true", "false", "none", "complex_number",
+}
 
 
-def _class_sig(node: ast.ClassDef) -> str:
-    bases = [ast.unparse(b) for b in node.bases] if node.bases else []
-    return f"class {node.name}({', '.join(bases)})"[:80] if bases else f"class {node.name}"
+def _py_module_name(node) -> str | None:
+    """dotted_name 'a.b' → 'a'；aliased_import → 内部名；identifier → 自身。"""
+    if node.type == "dotted_name":
+        return node.text.decode("utf-8").split(".")[0]
+    if node.type == "aliased_import":
+        for c in node.named_children:
+            if c.type == "dotted_name":
+                return c.text.decode("utf-8").split(".")[0]
+            if c.type == "identifier":
+                return c.text.decode("utf-8")
+        return None
+    if node.type == "identifier":
+        return node.text.decode("utf-8")
+    return None
 
 
-def _is_constant(value: ast.AST | None) -> bool:
-    return isinstance(value, ast.Constant)
+def _py_import_names(node) -> list[str]:
+    """import_statement / import_from_statement → 导入的符号名。"""
+    names = []
+    if node.type == "import_statement":
+        for c in node.named_children:
+            n = _py_module_name(c)
+            if n:
+                names.append(n)
+    else:  # import_from_statement：首个 named child 是 from 模块，其余是符号
+        for c in node.named_children[1:]:
+            n = _py_module_name(c)
+            if n:
+                names.append(n)
+    return names
 
 
 @_extractor(".py")
 def _extract_python(source: str, relpath: str) -> list[Symbol]:
-    """Python 符号提取：class/function/method/import/常量（模块级）。"""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
+    """Python 符号提取：class/function/method/import/常量（模块级 + 类级）。"""
+    root = _ts_parse(source, _py_lang)
+    if root is None:
         return []
     symbols: list[Symbol] = []
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef):
-            symbols.append(Symbol(node.name, "class", relpath, node.lineno, _class_sig(node)))
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    symbols.append(Symbol(
-                        item.name, "method", relpath, item.lineno,
-                        _func_sig(item, isinstance(item, ast.AsyncFunctionDef)),
-                    ))
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            symbols.append(Symbol(
-                node.name, "function", relpath, node.lineno,
-                _func_sig(node, isinstance(node, ast.AsyncFunctionDef)),
-            ))
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for t in targets:
-                value = node.value if isinstance(node, ast.Assign) else node.annotation
-                if isinstance(t, ast.Name) and _is_constant(value):
-                    symbols.append(Symbol(t.id, "constant", relpath, node.lineno))
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                symbols.append(Symbol(alias.name.split(".")[0], "import", relpath, node.lineno))
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                if alias.name != "*":
-                    symbols.append(Symbol(alias.name, "import", relpath, node.lineno))
+
+    def walk(node, *, in_class: bool = False) -> None:
+        t = node.type
+        if t == "class_definition":
+            n = _name_of(node)
+            if n:
+                symbols.append(Symbol(n, "class", relpath, node.start_point[0] + 1))
+            for c in node.named_children:
+                walk(c, in_class=True)
+            return  # 类内已深入（block）
+        if t == "function_definition":
+            n = _name_of(node)
+            if n:
+                kind = "method" if in_class else "function"
+                symbols.append(Symbol(n, kind, relpath, node.start_point[0] + 1))
+            return  # 不深入函数体：嵌套 def / 局部变量不进地图
+        if t == "decorated_definition":
+            # 装饰器包着的 class/function：直接处理被装饰者，跳过 decorator 细节
+            for c in node.named_children:
+                if c.type in ("class_definition", "function_definition"):
+                    walk(c, in_class=in_class)
+            return
+        if t in ("import_statement", "import_from_statement"):
+            for n in _py_import_names(node):
+                symbols.append(Symbol(n, "import", relpath, node.start_point[0] + 1))
+            return
+        if t == "expression_statement":
+            for c in node.named_children:
+                if c.type != "assignment":
+                    continue
+                left = c.child_by_field_name("left")
+                right = c.child_by_field_name("right")
+                if (left and left.type == "identifier" and right
+                        and right.type in _PY_LITERAL_TYPES):
+                    symbols.append(Symbol(left.text.decode("utf-8"), "constant",
+                                          relpath, c.start_point[0] + 1))
+            return
+        for c in node.named_children:
+            walk(c, in_class=in_class)
+
+    walk(root)
     return symbols
+
+
+def _py_lang():
+    import tree_sitter_python
+    return tree_sitter_python.language()
+
+
+_register_lang((".py",), _py_lang)
 
 
 # ---------------------------------------------------------------------------
 # JavaScript / TypeScript（含 tsx）
-
-
-def _ts_import_names(node) -> list[str]:
-    """从 import_statement 收集导入的符号名（含默认导入/命名导入/命名空间）。"""
-    names = []
-    for c in node.named_children:
-        if c.type == "import_clause":
-            names.extend(_ts_import_clause_names(c))
-    return list(dict.fromkeys(names))
 
 
 def _ts_import_clause_names(clause) -> list[str]:
@@ -220,16 +267,6 @@ def _ts_import_clause_names(clause) -> list[str]:
     return names
 
 
-def _first_ident(node):
-    stack = [node]
-    while stack:
-        n = stack.pop(0)
-        if n.type in _IDENT_LEAF_TYPES and n.child_count == 0:
-            return n
-        stack.extend(n.named_children)
-    return None
-
-
 def _extract_js_ts(source: str, relpath: str, language_getter) -> list[Symbol]:
     root = _ts_parse(source, language_getter)
     if root is None:
@@ -239,6 +276,10 @@ def _extract_js_ts(source: str, relpath: str, language_getter) -> list[Symbol]:
     def walk(node, *, in_class: bool = False) -> None:
         t = node.type
         if t == "class_declaration":
+            n = _name_of(node)
+            if n:
+                symbols.append(Symbol(n, "class", relpath, node.start_point[0] + 1))
+        elif t in ("interface_declaration", "type_alias_declaration", "enum_declaration"):
             n = _name_of(node)
             if n:
                 symbols.append(Symbol(n, "class", relpath, node.start_point[0] + 1))
@@ -260,14 +301,11 @@ def _extract_js_ts(source: str, relpath: str, language_getter) -> list[Symbol]:
                 value = decl.child_by_field_name("value")
                 kind = "function" if value and value.type in ("arrow_function", "function") else "constant"
                 symbols.append(Symbol(n, kind, relpath, decl.start_point[0] + 1))
-        elif t in ("interface_declaration", "type_alias_declaration", "enum_declaration"):
-            # TS 专属：类型定义也归入 class（模型需要知道这些类型存在）
-            n = _name_of(node)
-            if n:
-                symbols.append(Symbol(n, "class", relpath, node.start_point[0] + 1))
         elif t == "import_statement":
-            for n in _ts_import_names(node):
-                symbols.append(Symbol(n, "import", relpath, node.start_point[0] + 1))
+            for c in node.named_children:
+                if c.type == "import_clause":
+                    for n in _ts_import_clause_names(c):
+                        symbols.append(Symbol(n, "import", relpath, node.start_point[0] + 1))
         for c in node.named_children:
             walk(c, in_class=in_class)
 
@@ -303,6 +341,11 @@ def _extract_typescript(source: str, relpath: str) -> list[Symbol]:
 @_extractor(".tsx")
 def _extract_tsx(source: str, relpath: str) -> list[Symbol]:
     return _extract_js_ts(source, relpath, _tsx_lang)
+
+
+_register_lang((".js", ".jsx", ".mjs", ".cjs"), _js_lang)
+_register_lang((".ts", ".mts", ".cts"), _ts_lang)
+_register_lang((".tsx",), _tsx_lang)
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +402,9 @@ def _go_lang():
     return tree_sitter_go.language()
 
 
+_register_lang((".go",), _go_lang)
+
+
 # ---------------------------------------------------------------------------
 # Rust
 
@@ -404,6 +450,9 @@ def _extract_rust(source: str, relpath: str) -> list[Symbol]:
 def _rs_lang():
     import tree_sitter_rust
     return tree_sitter_rust.language()
+
+
+_register_lang((".rs",), _rs_lang)
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +505,9 @@ def _java_lang():
     return tree_sitter_java.language()
 
 
+_register_lang((".java",), _java_lang)
+
+
 # ---------------------------------------------------------------------------
 # 文件发现与符号提取入口
 
@@ -489,42 +541,49 @@ def extract_symbols(source: str, relpath: str) -> list[Symbol]:
         return []
 
 
+def _parse_root(source: str, relpath: str) -> object | None:
+    """按扩展名取语言解析器，返回根节点（引用计数/提取共用同一解析路径）。"""
+    ext = os.path.splitext(relpath)[1]
+    getter = _LANG_GETTERS.get(ext)
+    if getter is None:
+        return None
+    return _ts_parse(source, getter)
+
+
 # ---------------------------------------------------------------------------
 # 索引与引用计数
 
 
-_WORD_RE_CACHE: dict[str, re.Pattern] = {}
-
-
-def _word_re(name: str) -> re.Pattern:
-    pat = _WORD_RE_CACHE.get(name)
-    if pat is None:
-        pat = re.compile(rf"\b{re.escape(name)}\b")
-        _WORD_RE_CACHE[name] = pat
-    return pat
+def _collect_identifiers(root) -> Counter:
+    """数一棵树里所有标识符叶子（注释/字符串是独立节点，天然不计入）。"""
+    counts: Counter = Counter()
+    stack = [root]
+    while stack:
+        n = stack.pop()
+        if n.type in _IDENT_LEAF_TYPES and n.child_count == 0:
+            try:
+                counts[n.text.decode("utf-8")] += 1
+            except Exception:
+                pass
+        stack.extend(n.named_children)
+    return counts
 
 
 def _count_references(entries: list[tuple[str, str]], all_names: set[str]) -> Counter:
-    """引用计数：.py 用 ast.Name 精确（Load 语境）；其余语言用词边界文本计数。
+    """统一引用计数：所有语言数 identifier 叶子。
 
-    文本计数会把注释/字符串里的同名也计入（高估），但作为重要性排序的入度
-    近似足够——核心符号（被多处引用）天然排前。语言无关，零语法依赖。
+    定义处/属性访问也计入（近似「出现次数」）——注释里、字符串里的同名不会
+    混入（它们是独立节点类型）。排序语义与语言无关，核心符号天然排前。
     """
     refs: Counter = Counter()
-    ast_names = all_names
     for source, rel in entries:
-        if rel.endswith(".py"):
-            try:
-                tree = ast.parse(source)
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                    if node.id in ast_names:
-                        refs[node.id] += 1
-        else:
-            for name in all_names:
-                refs[name] += len(_word_re(name).findall(source))
+        root = _parse_root(source, rel)
+        if root is None:
+            continue
+        counts = _collect_identifiers(root)
+        for name in all_names:
+            if name in counts:
+                refs[name] += counts[name]
     return refs
 
 
