@@ -269,6 +269,9 @@ def main() -> None:
     total_tokens = sum(r["prompt_tokens"] + r["completion_tokens"] for r in records)
     print(f"\n[bench] 通过率 {passed}/{len(records)} · 均分 {summary['aggregate']['avg_score']} · 总消耗 {total_tokens:,} tokens")
 
+    # MANDATE 提醒（非强制）：真实 API 评测必须留档到 EXPERIMENTS.md（见 AGENTS.md）
+    print("▸ 记得按 MANDATE 把本次评测（含负结果）追加到 bench/EXPERIMENTS.md 并提交")
+
     if compare:
         print("\n[bench] 回归对比（vs baseline）：")
         for line in compare_summaries(prev_summary, summary):
