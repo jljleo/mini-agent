@@ -33,6 +33,7 @@ BENCH_DIR = PROJECT_ROOT / "bench"
 TASKS_DIR = BENCH_DIR / "tasks"
 RESULTS_DIR = BENCH_DIR / "results"
 
+import repo_map  # noqa: E402
 import tools  # noqa: E402
 import ui  # noqa: E402
 from agent import ChatSession  # noqa: E402
@@ -122,6 +123,26 @@ def score_task(meta: dict, task_dir: Path, sandbox: Path, session) -> dict:
     }
 
 
+def apply_group(group: str) -> None:
+    """按实验组切换代码库感知能力（A/B 对照用）。
+
+    map    = 实验组：注入 repo map + search_symbols 可用
+    nomap  = 对照组：不注入地图，工具面移除 search_symbols（含常驻声明与
+              search_tools 发现入口，模型完全不知道它的存在）——只能 read_file/grep 盲探。
+    """
+    import agent
+    import tool_registry
+    if group == "nomap":
+        agent.build_repo_map_cached = lambda **kw: ""          # noqa: E731 不注入地图
+        tool_registry.TOOLS.pop("search_symbols", None)        # 删除执行体
+        # 常驻名单与 schema 面同步移除（一处残留即 KeyError 或 schema 泄漏）
+        tool_registry.RESIDENT_TOOL_NAMES = tuple(
+            n for n in tool_registry.RESIDENT_TOOL_NAMES if n != "search_symbols"
+        )
+        agent.BASE_TOOLS = agent.get_resident_tool_schemas()    # 常驻声明重算
+    # map 组 = 默认行为，无需改动
+
+
 def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
     """单任务全流程：复制工作区 → 沙箱内跑 agent（带 trace）→ 分层判分 → 返回记录。"""
     sandbox = Path(tempfile.mkdtemp(prefix=f"bench_{task_dir.name}_"))
@@ -130,8 +151,10 @@ def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
 
     saved_root = tools.PROJECT_ROOT
     saved_confirm = tools.confirm
+    saved_repo_root = repo_map._IGNORED_ROOT
     tools.PROJECT_ROOT = str(sandbox)
     tools.confirm = lambda *args, **kwargs: True
+    repo_map._IGNORED_ROOT = str(sandbox)  # 注入的 repo map 索引进沙箱（否则会指向真实仓库）
     recorder = TraceRecorder(task_dir.name)
     session = None
     try:
@@ -142,6 +165,7 @@ def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
     finally:
         tools.PROJECT_ROOT = saved_root
         tools.confirm = saved_confirm
+        repo_map._IGNORED_ROOT = saved_repo_root
 
     scoring = score_task(meta, task_dir, sandbox, session)
     record = {
@@ -158,6 +182,12 @@ def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
 def main() -> None:
     compare = "--compare" in sys.argv[1:]
     only = next((a for a in sys.argv[1:] if not a.startswith("--")), None)
+    group = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                  if a.startswith("--group=")), "map")
+    if group not in ("map", "nomap"):
+        sys.exit(f"--group= 取值 map|nomap，收到: {group}")
+
+    apply_group(group)
 
     manifest = load_manifest(TASKS_DIR / "manifest.json")
     tasks = discover_tasks(only)
@@ -177,12 +207,13 @@ def main() -> None:
         started = time.time()
         record, recorder = run_task(task_dir, meta)
         record["elapsed_s"] = round(time.time() - started, 1)
+        record["group"] = group  # A/B 对照：map / nomap
         records.append(record)
 
         ts = time.strftime("%Y%m%d-%H%M%S")
-        out = RESULTS_DIR / f"{task_dir.name}-{ts}.json"
+        out = RESULTS_DIR / f"{task_dir.name}-{ts}-{group}.json"
         out.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-        trace_out = RESULTS_DIR / f"{task_dir.name}-{ts}.trace.jsonl"
+        trace_out = RESULTS_DIR / f"{task_dir.name}-{ts}-{group}.trace.jsonl"
         trace_out.write_text(recorder.to_jsonl(), encoding="utf-8")
 
         mark = "✅ PASS" if record["passed"] else "❌ FAIL"
