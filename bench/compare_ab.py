@@ -18,6 +18,7 @@ TARGETS = {
     "fix_checkout": "store/checkout.py",
     "fix_discount": "src/fees.js",
     "fix_retry": "service/retry.py",
+    "fix_notify_dedupe": "src/worker/helpers.py",
 }
 
 
@@ -57,7 +58,10 @@ def avg(vals: list[float]) -> float:
 
 def main() -> None:
     only = next((a for a in sys.argv[1:] if not a.startswith("--")), None)
+    model = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                  if a.startswith("--model=")), None)
     map_g, nomap_g = load_group("map"), load_group("nomap")
+
     tasks = sorted(t for t in set(map_g) | set(nomap_g) if only is None or t == only)
 
     print(f"{'任务':<15}{'组':<7}{'N':<3}{'通过':<7}{'轮均':<7}{'prompt均':<9}"
@@ -68,7 +72,7 @@ def main() -> None:
     for t in tasks:
         for group in ("map", "nomap"):
             src = map_g if group == "map" else nomap_g
-            recs = src.get(t, [])
+            recs = [r for r in src.get(t, []) if model is None or r.get("model", "kimi-k3") == model]
             if not recs:
                 continue
             n = len(recs)

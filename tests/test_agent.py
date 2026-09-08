@@ -224,6 +224,37 @@ class TestInterruptBetweenToolCalls:
         assert isinstance(events[-1], TurnEnd)
 
 
+class TestParallelToolCallInjectionOrder:
+    def test_injection_after_all_tool_responses(self, session, monkeypatch):
+        """并行双 tool_call（search_tools + 普通工具）时，动态注入 system 必须
+        排在本轮全部 tool 响应之后——插在中间会被 Moonshot 判孤儿 400
+        （评测在 fix_notify_dedupe nomap 组实拍）。"""
+        stub_chat_network(session, monkeypatch)
+        monkeypatch.setitem(agent.TOOLS, "fake_tool", lambda: "ok")
+        monkeypatch.setattr(agent, "get_extended_tool_schemas",
+                            lambda: [{"function": {"name": "x_tool", "description": "x"}}])
+        flows = iter([
+            StreamFinished([{"role": "assistant", "content": "",
+                             "tool_calls": [
+                                 {"id": "s_0", "type": "function",
+                                  "function": {"name": "search_tools", "arguments": "{}"}},
+                                 {"id": "f_1", "type": "function",
+                                  "function": {"name": "fake_tool", "arguments": "{}"}},
+                             ]}], None),
+            StreamFinished([{"role": "assistant", "content": "完成"}], None),
+        ])
+        monkeypatch.setattr(agent, "stream_and_assemble",
+                            lambda completion: iter([next(flows)]))
+
+        events = list(session.chat("并发调用"))
+        roles = [m["role"] for m in session.messages]
+        # 全部 tool 响应在注入声明之前：末尾应是 tool → tool → system → 终稿 assistant
+        assert roles[-4:] == ["tool", "tool", "system", "assistant"], \
+            f"注入应在 tool 响应之后: {roles[-4:]}"
+        assert len([r for r in roles if r == "tool"]) == 2, "两个 tool 调用都应有结果"
+        assert isinstance(events[-1], TurnEnd)
+
+
 class TestAutoCompact:
     def test_high_water_triggers_truncation(self, session, monkeypatch):
         """轮边界上下文超 HIGH 水位时自动触发 L1/L2 压缩，发送给 API 的 payload 变小。"""

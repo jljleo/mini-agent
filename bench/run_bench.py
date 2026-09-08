@@ -143,6 +143,24 @@ def apply_group(group: str) -> None:
     # map 组 = 默认行为，无需改动
 
 
+def apply_model(model: str | None) -> None:
+    """--model= 覆盖评测模型（默认 config.MODEL）。bench 结果带 model 标记。"""
+    global MODEL_IN_USE
+    if model:
+        import agent
+        agent.MODEL = model
+        print(f"[bench] 评测模型: {model}")
+    MODEL_IN_USE = model or _default_model()
+
+
+def _default_model() -> str:
+    import config
+    return config.MODEL
+
+
+MODEL_IN_USE: str = _default_model()
+
+
 def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
     """单任务全流程：复制工作区 → 沙箱内跑 agent（带 trace）→ 分层判分 → 返回记录。"""
     sandbox = Path(tempfile.mkdtemp(prefix=f"bench_{task_dir.name}_"))
@@ -186,8 +204,11 @@ def main() -> None:
                   if a.startswith("--group=")), "map")
     if group not in ("map", "nomap"):
         sys.exit(f"--group= 取值 map|nomap，收到: {group}")
+    model = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                  if a.startswith("--model=")), None)
 
     apply_group(group)
+    apply_model(model)
 
     manifest = load_manifest(TASKS_DIR / "manifest.json")
     tasks = discover_tasks(only)
@@ -208,6 +229,7 @@ def main() -> None:
         record, recorder = run_task(task_dir, meta)
         record["elapsed_s"] = round(time.time() - started, 1)
         record["group"] = group  # A/B 对照：map / nomap
+        record["model"] = MODEL_IN_USE  # 评测模型（跨模型样本可区分）
         records.append(record)
 
         ts = time.strftime("%Y%m%d-%H%M%S")

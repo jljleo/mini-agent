@@ -351,6 +351,8 @@ class ChatSession:
                     yield TurnEnd()
                     return
 
+                # 本轮是否调用了 search_tools（循环结束后统一注入声明，见下方注释）
+                search_tools_called = False
                 for i, tool_call in enumerate(tool_calls):
                     # 检查点③（工具间隙）：剩余调用补 interrupted 结果防孤儿 400。
                     # 正在执行的单个工具不打断——强杀 bash 子进程是另一档工程（v1 等它自然结束）
@@ -404,15 +406,21 @@ class ChatSession:
                             "content": tool_result,
                         }
                     )
+                    if name == "search_tools":
+                        search_tools_called = True
 
-                    # search_tools 被调用后，注入可发现工具声明（Moonshot 动态加载机制），幂等。
-                    # 当前没有可发现工具时不注入（空声明消息只会白占上下文）。
-                    # 子 agent（depth>0）注入时过滤元工具（spawn/todo），与 tools.search_tools
-                    # 的返回文本过滤是同一道防线的两层：少了这层，声明一旦入史，元工具即可被调用。
-                    if name == "search_tools" and not self._tools_already_injected():
-                        schemas = get_extended_tool_schemas()
-                        if self.depth > 0:
-                            schemas = [s for s in schemas
-                                       if s["function"]["name"] not in SUBAGENT_HIDDEN_TOOLS]
-                        if schemas:
-                            self.messages.append({"role": "system", "tools": schemas})
+                # search_tools 被调用后，注入可发现工具声明（Moonshot 动态加载机制），幂等。
+                # 必须在全部 tool 响应 append 之后注入：若插在并行 tool_call 的响应中间
+                # （assistant 一次发两个调用，先执行 search_tools），Moonshot 会把后一个
+                # tool_calls 判为孤儿返回 400（"did not have response messages"）——
+                # 评测在 fix_notify_dedupe nomap 组实拍到此现场。
+                # 当前没有可发现工具时不注入（空声明消息只会白占上下文）。
+                # 子 agent（depth>0）注入时过滤元工具（spawn/todo），与 tools.search_tools
+                # 的返回文本过滤是同一道防线的两层：少了这层，声明一旦入史，元工具即可被调用。
+                if search_tools_called and not self._tools_already_injected():
+                    schemas = get_extended_tool_schemas()
+                    if self.depth > 0:
+                        schemas = [s for s in schemas
+                                   if s["function"]["name"] not in SUBAGENT_HIDDEN_TOOLS]
+                    if schemas:
+                        self.messages.append({"role": "system", "tools": schemas})
