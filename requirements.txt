@@ -3,3 +3,13 @@ python-dotenv>=1.0
 prompt_toolkit>=3.0
 rich>=13.0
 textual>=0.86
+# 代码库感知（repo_map.py）多语言解析后端：tree-sitter 按需加载，
+# 主语言包全装（本仓库自身用 Python，加装 js/ts/go/rust/java 覆盖日常项目）；
+# 缺失的语言包只会让该语言提取静默为空，不影响其他语言。
+tree-sitter>=0.26
+tree-sitter-python>=0.25
+tree-sitter-javascript>=0.25
+tree-sitter-typescript>=0.23
+tree-sitter-go>=0.25
+tree-sitter-rust>=0.24
+tree-sitter-java>=0.23
