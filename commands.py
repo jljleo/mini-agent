@@ -25,7 +25,7 @@ from compact import (
 )
 from config import QUIT_COMMANDS, SESSION_FILE, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
 from tool_registry import TOOLS
-from tools import clear_todo_file, undo_last, undo_log_path
+from tools import clear_todo_file
 
 
 def _render_rows(rows: list[tuple[str, str]]) -> None:
@@ -52,21 +52,9 @@ def cmd_clear(session: ChatSession, args: str = ""):
     session.total_prompt_tokens = 0
     session.total_completion_tokens = 0
     clear_todo_file()
-    # /undo 日志随会话清空：撤销历史不跨会话（和存档删除同一语义）
-    if os.path.exists(undo_log_path()):
-        os.remove(undo_log_path())
     if os.path.exists(SESSION_FILE):
         os.remove(SESSION_FILE)  # 存档一并清除：/clear 后 /resume 不应复活旧会话
     ui.success("会话已清空，开始新的对话")
-
-
-@command("/undo", "回滚最近一次文件改动（连续调用逐步回退；只覆盖 edit_file/write_file 改动）")
-def cmd_undo(session: ChatSession, args: str = ""):
-    """撤销最近一次窄接口文件改动。
-
-    tools.undo_last() 负责快照读取/写回/日志弹出；恢复后对内容做语法冒烟提示。
-    """
-    ui.note(undo_last())
 
 
 @command("/tokens", "显示 token 消耗明细与上下文规模")

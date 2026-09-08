@@ -40,7 +40,6 @@
 - 命令权限随类型声明（`SUBAGENT_TYPES[*].command_policy`）：researcher=read_only（白名单直通，非白名单确定性硬拒，零 LLM 成本）；coder=human（allow 也降级为 ask，与 ambiguous 一起冒泡给人工审批，带 `[子 agent]` 前缀）。限制的唯一可信来源是 config，不是模型生成的参数。
 - 防乱派生：`spawn_subagent` 工具描述写死派生纪律（先规划边界、任务自包含、别乱派）；子 agent 运行中被拒的命令/访问计入 `_subagent_context`，达到 `SUBAGENT_DENIAL_LIMIT`（默认 3）即 `control.abort()` 熔断本轮，拒绝次数附在结论里回传主 agent 自我修正。
 - 文件工具是窄接口，围栏限制在 `PROJECT_ROOT`；项目外路径需要确认。`run_bash` 由 `permissions.json` 裁决：`deny > allow > ask`；如果命令包含项目外路径，即使命中 allow 也会降级为 ask。不要用 bash 绕过文件围栏访问项目外路径。
-- `/undo`：`edit_file`/`write_file` 写前自动快照（`.undo.log`，运行时解析路径随 `PROJECT_ROOT` 隔离），`/undo` 逐步回滚、`/clear` 清空撤销历史。**局限**：只覆盖窄接口改动——不要用 bash 重定向改写文件（既绕围栏，也不可撤销）。
 - `edit_file` 是容错策略链（AGENT_DESIGN 13 条）：L1 精确匹配（count>1 拒绝防误改）→ L2 行级宽容定位（忽略行尾空白/换行差异，仍强制唯一）→ L3 失败时报错带 read_file 指引 + 文件头部预览。改后自动做语法冒烟（tree-sitter），坏代码以带行号的 ⚠ 报错附在工具结果里回喂。两个工程纪律：读写必须 `newline=""` 保真（否则 CRLF 仓库换行风格被毁）；`_resolve_safe_path` 必须对 `PROJECT_ROOT` realpath 化（macOS /var→/private/var 符号链接会误判越界）。
 - `$web_search` 在 `config.py` 中被刻意禁用，因为 kimi-k3 当前处理内置工具结果会失败；需要联网时用 `run_bash` + `curl`，并先告诉用户要访问的 URL。
 - UI 输出统一走语义化 helper；TTY 使用 `tui.py`（Textual 全屏：输出 viewport + 底部固定 dock，离散事件渲染映射在 `tui_render.py` 纯函数里），管道模式继续用 `ui.py`。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
