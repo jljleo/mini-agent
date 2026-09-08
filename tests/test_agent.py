@@ -299,3 +299,41 @@ class TestSteering:
         assert not any(m.get("content") == "来不及注入的话" for m in session.messages)
         assert not any(m.get("content") == "不应到达" for m in session.messages)
         assert isinstance(events[-1], TurnEnd)
+
+
+class TestAgentsMdInjection:
+    """AGENTS.md 行为契约注入：全实例（含子 agent）随会话保留，失败静默。"""
+
+    def test_injected_as_system_message(self, tmp_path, monkeypatch):
+        import config
+        (tmp_path / "AGENTS.md").write_text(
+            "内核模块 agent.py/streaming.py/compact.py 严禁 import ui。",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(config, "PROJECT_ROOT", str(tmp_path))
+        session = agent.ChatSession(set_provider=False)
+        texts = [m.get("content", "") for m in session.messages
+                 if m.get("role") == "system"]
+        assert any("严禁 import ui" in t for t in texts), "契约应注入为 system 消息"
+        # 契约在模板之后、repo map 之前（含标题的行号序）
+        assert any("AGENTS.md 仓库行为约定" in t for t in texts)
+
+    def test_missing_file_skipped(self, tmp_path, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "PROJECT_ROOT", str(tmp_path))  # 无 AGENTS.md
+        session = agent.ChatSession(set_provider=False)
+        texts = [m.get("content", "") for m in session.messages
+                 if m.get("role") == "system"]
+        assert not any("AGENTS.md" in t for t in texts), "文件缺失应静默跳过"
+
+    def test_helper_returns_none_without_file(self, tmp_path, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "PROJECT_ROOT", str(tmp_path))
+        assert agent._agents_md_text() is None
+
+    def test_helper_reads_real_file(self, monkeypatch):
+        import config
+        real_root = config.PROJECT_ROOT  # 版本库根，AGENTS.md 在仓库内
+        monkeypatch.setattr(config, "PROJECT_ROOT", real_root)
+        text = agent._agents_md_text()
+        assert text and "项目形态" in text, "应读到真实 AGENTS.md 内容"

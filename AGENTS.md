@@ -1,5 +1,10 @@
 # AGENTS.md
 
+> 本文件会被 `agent.py` 自动注入 system prompt（随会话保留，compact 不截断）：
+> 它是对 AI 协作者的行为契约（编码规范/架构边界/踩坑清单），与 `repo_map.py`
+> 注入的代码库地图互补——地图回答「仓库有什么」，本文件回答「应该怎么改」。
+> 修改后即刻生效，无需重启。不要把一次性指令/环境特定信息写在这里（放 .env/README）。
+
 ## 项目形态
 
 - 扁平的 Python 3.13 CLI agent；有最小 `requirements.txt`（openai / python-dotenv / prompt_toolkit / rich / textual），没有构建步骤、lint 配置或代码生成。使用仓库内虚拟环境：`.venv/bin/python`；新环境先 `.venv/bin/pip install -r requirements.txt`。

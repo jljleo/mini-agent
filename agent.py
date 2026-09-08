@@ -19,6 +19,7 @@ import queue
 
 from openai import OpenAI
 
+import config
 from compact import (
     apply_message_cap,
     apply_slimming,
@@ -59,6 +60,20 @@ from streaming import interruptible_stream, stream_and_assemble
 from tool_registry import TOOLS, get_extended_tool_schemas, get_resident_tool_schemas
 from tools import set_history_provider
 
+# AGENTS.md 自动注入：仓库行为约定（编码规范/架构边界/踩坑清单）作为一条 system 消息
+# 注入在模板后、repo map 前——它是「怎么改代码」的交规，repo map 是「仓库有什么」的
+# 地图，两者同一注入边界。compact 头部保留区会保留开头连续的 system，契约不会截断。
+_AGENTS_MD_HEADER = "[AGENTS.md 仓库行为约定（随会话保留）：]"
+
+
+def _agents_md_text() -> str | None:
+    """读仓库根的 AGENTS.md；文件缺失/读失败时静默返回 None（契约是增强，不是依赖）。"""
+    try:
+        with open(os.path.join(config.PROJECT_ROOT, "AGENTS.md"), encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
 # 常驻请求的工具声明：search_tools（发现入口）+ 核心四件套（RESIDENT_TOOL_NAMES）。
 # 模块级算一次即可——本行执行时 tools.py 已完成导入注册（上方 from tools import），
 # 常驻档是静态集合，无需每轮重算。可发现工具（名单外）由 search_tools 检索后注入。
@@ -91,6 +106,12 @@ class ChatSession:
         self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
+        # AGENTS.md 行为契约注入（与 repo map 同构：失败静默，随会话保留）
+        agents_md = _agents_md_text()
+        if agents_md:
+            self.messages.append(
+                {"role": "system", "content": f"{_AGENTS_MD_HEADER}\n{agents_md}"}
+            )
         # 代码库地图注入：项目结构/核心符号一览（aider 式）。作为一条 system 消息
         # 追加在模板后——compact 的头部保留区会保留它，不会被截断。生成失败静默
         # 跳过（地图是增强，不是依赖）；模块级缓存避免每个会话重复扫描。
