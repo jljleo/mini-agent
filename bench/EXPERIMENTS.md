@@ -126,3 +126,32 @@ done
   不影响已写出结果，但会阻塞脚本循环——遇 kill 后重跑
 - 大仓库任务 token 消耗大（单次最高 29 万），跑多轮前先估算预算
 - 低成本方案：`--model=kimi-k2.6`（已验证可用）。换模型时同一 A/B 两组必须一致
+## 8. 编辑容错 A/B（fix_crlf_edit，模型 kimi-k2.7-code）
+
+**动机**：edit_file 容错链（L1 精确→L2 行级宽容→L3 指引 + 改后语法自检，AGENT_DESIGN
+13/48/49）到底值不值？最有区分度的场景是 **CRLF 工作区**：模型从 read_file 的归一化
+视图复制 old 必然带 LF，精确匹配必败，只有容错链能救。
+
+**对照组机制**：`--edit-mode=lenient|strict`——strict 把 L2 容错替换失效（回到旧精确
+时代）。payload 级控制，AGENTS.md 契约等不变。
+
+**任务**（`fix_crlf_edit`）：CRLF 定价文件含折扣 bug；prompt 强制「只能用 edit_file
+修改、禁止 bash 改写文件」；verify 同时断言修复正确 + 文件仍是 CRLF。
+
+| 组 | 通过率 | token 均 | 行为 |
+|---|---|---|---|
+| lenient（容错链） | 3/3 | **21,321** | read → edit 一次成功 |
+| strict（旧精确） | 3/3 | 49,188（**+131%**） | edit 失败 → cat -A/hexdump 诊断 CRLF → 手动构造带 `\r` 的 old 重试 |
+
+**结论**：两组成功率相同——因为模型足够聪明（探测行尾后手动嵌 `\r\n` 让精确匹配
+成功，严格绕开"bash 禁用"约束）。但容错链的价值以**信任成本**显形：同一任务，
+strict 组花 2.3 倍 token 在「失败→诊断→重试」回合。**容错链不救成功率，救的是
+"别让模型怀疑工具坏了"的往返开销**——工具在任何输入下都能工作，模型就不把时间
+花在诊断工具自身。
+
+**副产品（评测第三次抓到真实内核 bug）**：初跑 lenient 组全部 TypeError
+（`_lenient_replace() missing content/preview`）——追查发现 `@tool("edit_file")`
+装饰器在重构中挂到了 `_lenient_replace` 上：schema 是 `{path,old,new}`、执行体却是
+5 参函数，**kwargs 传 3 参必炸。单测直调 `tools.edit_file` 全绿（不经注册表），
+真实 agent 路径必失败——直调与注册表两条路径的差异只有真实运行才暴露，
+再次证明「评测是内核缺陷探测器」。
