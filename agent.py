@@ -44,6 +44,7 @@ from config import (
     TOOL_RESULT_PREVIEW_LEN,
     TRUNCATE_HIGH_TOKENS,
     TRUNCATE_LOW_TOKENS,
+    format_context_tokens,
 )
 from events import (
     Note,
@@ -125,17 +126,25 @@ class ChatSession:
         # 历史检索工具的数据源：存储（而非投影）——被瘦身/截断/摘要/截中的原文都可检索
         if set_provider:
             set_history_provider(lambda: self.messages)
-        # token 仪表盘：会话累计消耗
+        # token 仪表盘：会话累计消耗 + 当前上下文占用（最近一次请求的 prompt tokens）
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+        self.last_prompt_tokens = 0
         # 子 agent 支持：可注入的工具集与嵌套深度
         self.tools = tools if tools is not None else BASE_TOOLS
         self.depth = depth
 
     def status_text(self) -> str:
-        """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。"""
+        """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。
+
+        ctx 占比 = 当前上下文占用 / 窗口（pi 同款比例样式）：占用优先取最近一次
+        请求的真实 prompt tokens（compact 截断后的投影大小），首轮前退化为估算。
+        累计 tokens 是另一码事（会话总消耗），不拿它除窗口——截断后会失真。
+        """
         total = self.total_prompt_tokens + self.total_completion_tokens
-        return f"{MODEL} · ctx {CONTEXT_TOKENS // 1000}K · tokens {total:,}"
+        used = self.last_prompt_tokens or estimate_total_tokens(self.messages)
+        pct = used / CONTEXT_TOKENS * 100
+        return f"{MODEL} · ctx {pct:.1f}%/{format_context_tokens()} · tokens {total:,}"
 
     # ---- 历史管理 ----
 
@@ -317,6 +326,7 @@ class ChatSession:
                 calibrate(usage.prompt_tokens, payload)  # 用真实值校准估算系数，观测闭环
                 self.total_prompt_tokens += usage.prompt_tokens
                 self.total_completion_tokens += usage.completion_tokens
+                self.last_prompt_tokens = usage.prompt_tokens  # 当前上下文占用（状态栏百分比）
                 cached = getattr(usage, "cached_tokens", 0) or 0
                 yield Usage(usage.prompt_tokens, usage.completion_tokens, cached,
                             self.total_prompt_tokens + self.total_completion_tokens)

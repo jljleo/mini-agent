@@ -368,3 +368,21 @@ class TestAgentsMdInjection:
         monkeypatch.setattr(config, "PROJECT_ROOT", real_root)
         text = agent._agents_md_text()
         assert text and "项目形态" in text, "应读到真实 AGENTS.md 内容"
+
+
+class TestStatusText:
+    """状态栏比例样式（pi 同款）：ctx 占用% / 窗口 · 会话累计 tokens。"""
+
+    def test_percentage_uses_last_prompt_tokens(self, session):
+        # 占用 = 最近一次请求的真实 prompt tokens / 窗口，不是会话累计（截断后会失真）
+        session.last_prompt_tokens = 12_800  # kimi 128K 窗口的 10%
+        session.total_prompt_tokens = 99_999
+        session.total_completion_tokens = 1
+        assert "ctx 10.0%/128K" in session.status_text()
+        assert "tokens 100,000" in session.status_text()
+
+    def test_first_turn_falls_back_to_estimate(self, session):
+        # 尚无真实 usage 时退化为投影估算，且不为 0（system 模板本身占上下文）
+        text = session.status_text()
+        assert "ctx 0.0%" not in text
+        assert "%/128K" in text

@@ -45,6 +45,11 @@ BASE_URL = _profile["base_url"]
 API_KEY_ENV = _profile["api_key_env"]  # 从环境变量读 key，不入库
 CONTEXT_TOKENS = _profile["context_tokens"]  # 上下文窗口（截断水位依据 + 状态栏显示）
 
+
+def format_context_tokens(n: int = CONTEXT_TOKENS) -> str:
+    """上下文窗口的紧凑显示：128K / 1.0M（状态栏与横幅共用，pi 同款比例样式）。"""
+    return f"{n / 1_000_000:.1f}M" if n >= 1_000_000 else f"{n // 1000}K"
+
 # --- agent 循环 ---
 # 无硬性轮次上限：交互场景人在看（业界交互模式均不设上限），失控防线是下面的
 # 行为保险丝。bench 等无人值守场景的上限应加在调用侧，不污染交互循环。

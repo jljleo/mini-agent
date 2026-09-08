@@ -30,7 +30,7 @@ import commands  # noqa: F401  集中式注册：导入即触发 @command 注册
 import ui
 from agent import ChatSession
 from command_registry import COMMANDS
-from config import CONTEXT_TOKENS, MODEL, QUIT_COMMANDS
+from config import MODEL, QUIT_COMMANDS, format_context_tokens
 from events import (
     Note,
     ReasoningDelta,
@@ -214,7 +214,7 @@ class Dock(Vertical):
     def compose(self) -> ComposeResult:
         yield Static("", id="approval")
         yield Static("", id="queued")
-        yield Static(f"{MODEL} · ctx {CONTEXT_TOKENS // 1000}K · tokens 0", id="status")
+        yield Static(f"{MODEL} · ctx 0.0%/{format_context_tokens()} · tokens 0", id="status")
         yield OptionList(id="completion")
         yield Input(placeholder="输入问题开始对话 · /help 查看命令", id="prompt")
 

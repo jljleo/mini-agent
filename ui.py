@@ -25,6 +25,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.theme import Theme
 
+from config import format_context_tokens
 from events import (
     Note,
     ReasoningDelta,
@@ -95,7 +96,7 @@ def goodbye() -> None:
 
 def banner(model: str, cwd: str, context_tokens: int | None = None) -> None:
     """启动横幅：品牌 + 关键上下文（模型/目录）+ 最小上手提示。"""
-    ctx = f" · ctx {context_tokens // 1000}K" if context_tokens else ""
+    ctx = f" · ctx {format_context_tokens(context_tokens)}" if context_tokens else ""
     if not console.is_terminal:
         console.print(f"mini-agent · {model}{ctx}")
         return

@@ -57,3 +57,10 @@ def test_unknown_profile_fails_fast(reload_config):
     # 拼错的档案名必须在启动时炸出来（带可选名单），而不是静默落到某个模型上
     with pytest.raises(SystemExit, match="未知模型档案"):
         reload_config("kimi-typo")
+
+
+def test_format_context_tokens():
+    assert config.format_context_tokens(128_000) == "128K"
+    assert config.format_context_tokens(131_072) == "131K"
+    assert config.format_context_tokens(1_000_000) == "1.0M"
+    assert config.format_context_tokens() == "128K"  # 缺省 = 当前档案窗口
