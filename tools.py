@@ -181,6 +181,7 @@ def read_file(path: str, offset: int = 0, limit: int = 10000) -> str:
 def write_file(path: str, content: str) -> str:
     full = _resolve_safe_path(path, "write_file")
     os.makedirs(os.path.dirname(full), exist_ok=True)
+    _snapshot_before_write(full)  # /undo 快照：写前记录原状态
     with open(full, "w", encoding="utf-8") as f:
         f.write(content)
     return f"Content written to {path}"
@@ -283,6 +284,7 @@ def edit_file(path: str, old: str, new: str) -> str:
             raise ValueError(_edit_not_found_message(path, preview, content))
         content = lenient
 
+    _snapshot_before_write(full)  # /undo 快照：写前记录原状态
     with open(full, "w", encoding="utf-8", newline="") as f:
         f.write(content)
 
@@ -588,6 +590,63 @@ def search_history(keyword: str, context_chars: int = 200) -> str:
 # ---------- todo 工具 ----------
 
 TODO_FILE = os.path.join(PROJECT_ROOT, "session_todos.json")
+
+
+def undo_log_path() -> str:
+    """撤销日志路径：运行时解析（PROJECT_ROOT 是可变副本，bench 沙箱自动隔离）。"""
+    return os.path.join(PROJECT_ROOT, ".undo.log")
+
+
+def _snapshot_before_write(full: str) -> None:
+    """写文件前的快照：原内容 append 到 .undo.log（/undo 回滚用）。
+
+    只覆盖窄接口（edit_file / write_file）的改动——bash 重定向改写不在快照内
+    （AGENTS.md 约定：文件改动应走窄接口）。新建文件记 existed=false（undo 时删除）。
+    快照失败静默跳过：撤销是增强，不能阻塞写。
+    """
+    try:
+        rel = os.path.relpath(full, PROJECT_ROOT)
+        if os.path.exists(full):
+            with open(full, encoding="utf-8", newline="") as f:
+                content = f.read()
+            entry = {"path": rel, "existed": True, "content": content}
+        else:
+            entry = {"path": rel, "existed": False, "content": ""}
+        with open(undo_log_path(), "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # 快照失败不阻塞写
+
+
+def undo_last() -> str:
+    """/undo 执行体：回滚最近一次窄接口文件改动（连续调用逐步回退）。
+
+    回滚后对恢复内容做语法冒烟提示（改回坏状态也立刻让用户知道）。
+    """
+    log = undo_log_path()
+    if not os.path.exists(log):
+        return "没有可撤销的文件操作。"
+    with open(log, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    if not lines:
+        return "没有可撤销的文件操作。"
+    entry = json.loads(lines[-1])
+    rest = lines[:-1]
+    full = os.path.join(PROJECT_ROOT, entry["path"])
+    if entry["existed"]:
+        with open(full, "w", encoding="utf-8", newline="") as f:
+            f.write(entry["content"])
+        msg = f"已回滚 {entry['path']}（撤销 {len(lines) - len(rest)} 步，现剩 {len(rest)} 步）"
+        diags = repo_map.syntax_diagnostics(entry["content"], entry["path"])
+        if diags:
+            msg += "\n⚠ 回滚后的内容仍有语法错误：" + diags[0]
+    else:
+        if os.path.exists(full):
+            os.remove(full)
+        msg = f"已撤销新建：删除 {entry['path']}"
+    with open(log, "w", encoding="utf-8") as f:
+        f.write("\n".join(rest) + ("\n" if rest else ""))
+    return msg
 TODO_STATUSES = ("pending", "in_progress", "completed")
 _STATUS_ICONS = {"pending": "○", "in_progress": "▶", "completed": "✓"}
 
