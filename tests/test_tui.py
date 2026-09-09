@@ -22,12 +22,12 @@ def test_textual_dependency_available():
 
 
 def test_split_complete_freezes_completed_blocks_only():
-    from tui import _split_complete
+    from stream_segments import split_complete
 
-    assert _split_complete("完整段落\n\n尾部") == ("完整段落\n\n", "尾部")
-    assert _split_complete("无空行分隔") == ("", "无空行分隔")
-    assert _split_complete("```\n半截代码\n") == ("", "```\n半截代码\n")  # 未闭合 fence 不切
-    assert _split_complete("```\n代码\n```\n\n正文") == ("```\n代码\n```\n\n", "正文")
+    assert split_complete("完整段落\n\n尾部") == ("完整段落\n\n", "尾部")
+    assert split_complete("无空行分隔") == ("", "无空行分隔")
+    assert split_complete("```\n半截代码\n") == ("", "```\n半截代码\n")  # 未闭合 fence 不切
+    assert split_complete("```\n代码\n```\n\n正文") == ("```\n代码\n```\n\n", "正文")
 
 
 def test_flush_timer_survives_dirty_clearing():
@@ -50,6 +50,106 @@ def test_flush_timer_survives_dirty_clearing():
             v.append_text("B")      # 间隔 < 80ms，不会立即 flush
             await pilot.pause(0.1)  # 修复后定时器仍在，会 flush "B"
             assert "B" in v._stream_widget._markdown
+
+    run(scenario())
+
+
+def test_loader_fills_ttft_gap_and_dismisses_on_first_delta():
+    # 等待期（StreamStart → 首个 delta）显示动画 loader，不再死屏
+    from textual.app import App
+
+    from tui import Loader, TranscriptView
+
+    class BareApp(App):
+        def compose(self):
+            yield TranscriptView()
+
+    async def scenario():
+        app = BareApp()
+        async with app.run_test() as pilot:
+            v = app.query_one(TranscriptView)
+            v.begin_stream()
+            await pilot.pause(0.2)
+            loader = v.query_one(Loader)
+            assert loader._frame > 0  # spinner 动画确实在走帧
+            v.append_text("首个 delta")
+            await pilot.pause()
+            assert not v.query(Loader)  # 内容到达即撤
+            assert v._stream_widget is not None
+
+    run(scenario())
+
+
+def test_loader_dismissed_on_finish_without_content():
+    # 纯工具调用的一轮（无任何正文/推理）：loader 不能残留到下一轮
+    from textual.app import App
+
+    from tui import Loader, TranscriptView
+
+    class BareApp(App):
+        def compose(self):
+            yield TranscriptView()
+
+    async def scenario():
+        app = BareApp()
+        async with app.run_test() as pilot:
+            v = app.query_one(TranscriptView)
+            v.begin_stream()
+            v.finish_stream()
+            await pilot.pause()
+            assert not v.query(Loader)
+            assert v._stream_widget is None
+
+    run(scenario())
+
+
+def test_tool_call_component_animates_then_collapses():
+    # 工具调用活动组件：执行中转圈（无 ⏺ 定格），结果到达折叠为 ⏺/⎿
+    from textual.app import App
+
+    from tui import ToolCallView, TranscriptView
+
+    class BareApp(App):
+        def compose(self):
+            yield TranscriptView()
+
+    async def scenario():
+        app = BareApp()
+        async with app.run_test() as pilot:
+            v = app.query_one(TranscriptView)
+            v.begin_tool_call("run_bash", '{"command": "ls"}')
+            await pilot.pause(0.2)
+            widget = v.query_one(ToolCallView)
+            assert widget._frame > 0        # 动画在走
+            assert widget._preview is None  # 尚未定格
+            assert "⏺ run_bash" in v.text_content()
+
+            v.finish_tool_call("ok done")
+            await pilot.pause()
+            assert widget._preview == "ok done"
+            assert not v._active_tools  # FIFO 配对消耗
+            assert "⎿" in v.text_content()
+
+    run(scenario())
+
+
+def test_orphan_tool_result_falls_back_to_static_line():
+    # 防御：无配对 start 的 result（异常路径）退化为静态行，内容不丢
+    from textual.app import App
+
+    from tui import TranscriptView
+
+    class BareApp(App):
+        def compose(self):
+            yield TranscriptView()
+
+    async def scenario():
+        app = BareApp()
+        async with app.run_test() as pilot:
+            v = app.query_one(TranscriptView)
+            v.finish_tool_call("孤独的结果")
+            await pilot.pause()
+            assert "孤独的结果" in v.text_content()
 
     run(scenario())
 

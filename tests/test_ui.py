@@ -53,14 +53,14 @@ class TestSegmentedFinalization:
         r = make_renderer(monkeypatch)
         r.on_content("第一段。\n\n第二段进行中")
         assert "第一段" in capsys.readouterr().out
-        assert r._tail == "第二段进行中"
+        assert r._segments.tail == "第二段进行中"
 
     def test_unclosed_code_fence_blocks_finalization(self, monkeypatch, capsys):
         """代码块未闭合（``` 奇数）时暂不落卷：半拉 fence 单独渲染会错乱。"""
         r = make_renderer(monkeypatch)
         r.on_content("```python\ncode line\n\n还在代码块里")
         assert capsys.readouterr().out == ""  # 什么都没落卷
-        assert r._tail == "```python\ncode line\n\n还在代码块里"
+        assert r._segments.tail == "```python\ncode line\n\n还在代码块里"
 
     def test_fence_close_resumes_finalization(self, monkeypatch, capsys):
         r = make_renderer(monkeypatch)
@@ -68,14 +68,14 @@ class TestSegmentedFinalization:
         r.on_content("```\n\n收尾段落")
         out = capsys.readouterr().out
         assert "code" in out  # 闭合后整块落卷
-        assert r._tail == "收尾段落"
+        assert r._segments.tail == "收尾段落"
 
     def test_no_blank_line_no_finalize(self, monkeypatch, capsys):
         """没有空行 = 只有一个进行中的块，全部留在 Live。"""
         r = make_renderer(monkeypatch)
         r.on_content("一行\n两行\n三行")
         assert capsys.readouterr().out == ""
-        assert "三行" in r._tail
+        assert "三行" in r._segments.tail
 
     def test_exit_renders_remaining_tail(self, monkeypatch, capsys):
         """收尾：节流期间没渲染的尾巴在 __exit__ 强制全量渲染。"""

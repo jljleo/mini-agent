@@ -38,6 +38,7 @@ from events import (
     Usage,
     Warn,
 )
+from stream_segments import StreamSegmenter
 
 THEME = Theme(
     {
@@ -203,7 +204,7 @@ class StreamRenderer:
         self._live_ok = live and not self._plain
         self._status = None
         self._live: Live | None = None
-        self._tail = ""  # 进行中的尾部；已完成的块已落卷轴
+        self._segments = StreamSegmenter()  # 完成段落卷 + 进行中尾部的唯一切割来源
         self._last_render = 0.0
         self._reasoning_shown = 0
         self._reasoning_truncated = False
@@ -239,34 +240,31 @@ class StreamRenderer:
             self._reasoning_truncated = True
         console.print(chunk, end="", style="reasoning", markup=False, soft_wrap=True)
 
-    def _finalize_complete_blocks(self) -> None:
-        """把已完成的块（空行分界）永久落卷轴，Live 只保留进行中的尾部。
+    def _land_completed(self) -> None:
+        """把已完成的段永久落卷轴，Live 只保留进行中的尾段。
 
-        为什么必须这么做：Live 的重绘是“光标上移 N 行重写”，N = 上次渲染高度；
+        为什么必须这么做：Live 的重绘是"光标上移 N 行重写"，N = 上次渲染高度；
         内容超过终端高度时，超出的行已滚入 scrollback，光标上移够不到真正的起点，
         每次刷新都在下方留下一份完整副本——长回答会随节流刷新重复几十次。
-        落卷后 Live 区域永远只有一个块的高度，从机制上杜绝超高重绘。
+        落卷后 Live 区域永远只有一个段的高度，从机制上杜绝超高重绘。
 
         非 Live（常驻输入框）模式下，落卷就是唯一的渲染方式：
-        块完成即渲染 Markdown，尾部等收尾。
+        段完成即渲染 Markdown，尾部等收尾。
 
-        代码块未闭合（``` 为奇数个）时暂不落卷：半拉的 fence 单独渲染会错乱。
+        切割规则（fence 闭合 + 空行分界）收敛在 stream_segments.StreamSegmenter。
+        Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）；
+        patch_stdout 下则被抬升到输入框上方——两种形态共用这一行。
         """
-        if self._tail.count("```") % 2 == 1:
+        done = self._segments.take_completed()
+        if not done:
             return
-        idx = self._tail.rfind("\n\n")
-        if idx <= 0:
-            return
-        done, self._tail = self._tail[:idx + 2], self._tail[idx + 2:]
-        # Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）；
-        # patch_stdout 下则被抬升到输入框上方——两种形态共用这一行
         console.print(Markdown(done))
         if self._live is not None:
-            self._live.update(Markdown(self._tail), refresh=False)
+            self._live.update(Markdown(self._segments.tail), refresh=False)
         self._last_render = time.monotonic()
 
     def on_content(self, text: str) -> None:
-        """正文：Live 模式增量重排尾部；常驻输入框模式只落卷完成块；管道纯文本直出。"""
+        """正文：Live 模式增量重排尾段；常驻输入框模式只落卷完成段；管道纯文本直出。"""
         self._stop_spinner()
         if self._plain:
             print(text, end="", flush=True)
@@ -282,25 +280,26 @@ class StreamRenderer:
                 vertical_overflow="visible",
             )
             self._live.start()
-        self._tail += text
-        self._finalize_complete_blocks()
+        self._segments.feed(text)
+        self._land_completed()
         if self._live is not None:
             now = time.monotonic()
             if now - self._last_render >= LIVE_RENDER_INTERVAL:
-                self._live.update(Markdown(self._tail), refresh=False)
+                self._live.update(Markdown(self._segments.tail), refresh=False)
                 self._last_render = now
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self._stop_spinner()
+        tail = self._segments.finish()
         if self._live is not None:
-            # 终稿强制全量渲染一次，收掉节流期间的尾巴（此时只剩最后一个块）
-            self._live.update(Markdown(self._tail), refresh=True)
+            # 终稿强制全量渲染一次，收掉节流期间的尾巴（此时只剩最后一个段）
+            self._live.update(Markdown(tail), refresh=True)
             self._live.stop()
             self._live = None
             console.print()
-        elif self._tail:
-            # 常驻输入框模式：收尾把未闭合的尾部块渲染出来
-            console.print(Markdown(self._tail))
+        elif tail:
+            # 常驻输入框模式：收尾把未闭合的尾段渲染出来
+            console.print(Markdown(tail))
             console.print()
         elif self._reasoning_shown:
             console.print(" …" if self._reasoning_truncated else "")

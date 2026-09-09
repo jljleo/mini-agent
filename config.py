@@ -112,7 +112,7 @@ USER_PROFILES: dict = {}
 refresh_default_profiles()
 refresh_user_profiles()
 
-MODEL_PROFILE = os.environ.get("MINI_AGENT_MODEL", "kimi")
+MODEL_PROFILE = os.environ.get("MINI_AGENT_MODEL", "kimi-code")
 try:
     apply_profile(MODEL_PROFILE)
 except KeyError as exc:

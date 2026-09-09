@@ -31,26 +31,26 @@ def reload_config(monkeypatch, tmp_path):
         config.refresh_user_profiles()
         if name is not None:
             monkeypatch.setenv("MINI_AGENT_MODEL", name)
-        try:
-            config.apply_profile(name or "kimi")
-        except KeyError as exc:
-            available = ", ".join(config.list_profiles())
-            raise SystemExit(
-                f"未知模型档案 {name!r}（MINI_AGENT_MODEL），"
-                f"可选：{available}；新模型请在 models.default.json 或 models.json 添加"
-            ) from exc
+            try:
+                config.apply_profile(name)
+            except KeyError as exc:
+                available = ", ".join(config.list_profiles())
+                raise SystemExit(
+                    f"未知模型档案 {name!r}（MINI_AGENT_MODEL），"
+                    f"可选：{available}；新模型请在 models.default.json 或 models.json 添加"
+                ) from exc
 
     yield _reload
     monkeypatch.delenv("MINI_AGENT_MODEL", raising=False)
     importlib.reload(config)
 
 
-def test_default_profile_is_kimi(reload_config):
+def test_default_profile_is_kimi_code(reload_config):
     reload_config(None)
-    assert config.MODEL_PROFILE == "kimi"
-    assert config.MODEL == "kimi-k3"
-    assert config.BASE_URL == "https://api.moonshot.cn/v1"
-    assert config.API_KEY_ENV == "MOONSHOT_API_KEY"
+    assert config.MODEL_PROFILE == "kimi-code"
+    assert config.MODEL == "k3"
+    assert config.BASE_URL == "https://api.kimi.com/coding/v1"
+    assert config.API_KEY_ENV == "KIMI_CODE_API_KEY"
 
 
 def test_profile_switch(reload_config):
@@ -62,7 +62,7 @@ def test_profile_switch(reload_config):
 
 
 def test_truncation_watermarks_follow_context_window(reload_config):
-    # 默认 kimi-k3 现在是 1M 窗口：水位按公式走
+    # kimi 档案现在是 1M 窗口：水位按公式走
     reload_config("kimi")
     assert config.TRUNCATE_HIGH_TOKENS == config.CONTEXT_TOKENS - 28_000
     assert 0 < config.TRUNCATE_LOW_TOKENS < config.TRUNCATE_HIGH_TOKENS
@@ -123,4 +123,4 @@ def test_format_context_tokens():
     assert config.format_context_tokens(128_000) == "128K"
     assert config.format_context_tokens(131_072) == "131K"
     assert config.format_context_tokens(1_000_000) == "1.0M"
-    assert config.format_context_tokens() == "1.0M"  # 缺省 = 当前默认档案窗口（kimi-k3 1M）
+    assert config.format_context_tokens() == "1.0M"  # 缺省 = 当前默认档案窗口（kimi-code 1M）

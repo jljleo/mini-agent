@@ -45,26 +45,14 @@ from events import (
     Warn,
 )
 from input_utils import sanitize
-from tui_render import render_event
+from stream_segments import StreamSegmenter
+from tui_render import _format_args, render_event
 
 _REASONING_PREVIEW_LIMIT = 600
 _STREAM_FLUSH_INTERVAL = 0.08  # 秒；TextDelta 节流，避免每个小 delta 全量 Markdown.update
 _STREAM_FLUSH_CHARS = 2000     # 累积到该字符数也立即 flush
-
-
-def _split_complete(text: str) -> tuple[str, str]:
-    """把已完成块从流式缓冲里切出来，返回 (完成部分, 尾部)。
-
-    只有 ``` 成对（偶数个）且存在空行分界时才切割：未闭合 fence 的 Markdown
-    单独渲染会错乱，必须等它闭合。完成块落卷后永不重排，只剩尾部参与增量渲染，
-    从机制上杜绝"每 chunk 全量重排长回答"的 O(n²) 抖动（同 StreamRenderer 落卷）。
-    """
-    if text.count("```") % 2 == 1:
-        return "", text
-    idx = text.rfind("\n\n")
-    if idx <= 0:
-        return "", text
-    return text[:idx + 2], text[idx + 2:]
+_LOADER_INTERVAL = 0.1         # 秒；loader/工具调用 spinner 的动画帧间隔
+_LOADER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"  # braille 旋转帧（pi 风格 loader）
 
 
 class KernelEvent(Message):
@@ -85,17 +73,91 @@ class ModelSelected(Message):
         self.profile_name = profile_name
 
 
+class Loader(Static):
+    """等待期活动组件（pi 风格）：braille spinner + 状态文本 + 耗时。
+
+    StreamStart 后挂上，首个内容（推理/正文）到达或流结束时撤掉——
+    消除 TTFT 期间的死屏。
+    """
+
+    def __init__(self, label: str = "思考中…") -> None:
+        super().__init__("")
+        self._label = label
+        self._frame = 0
+        self._started = time.monotonic()
+
+    def on_mount(self) -> None:
+        self._tick()
+        self.set_interval(_LOADER_INTERVAL, self._tick)
+
+    def _tick(self) -> None:
+        spinner = _LOADER_FRAMES[self._frame % len(_LOADER_FRAMES)]
+        self._frame += 1
+        elapsed = time.monotonic() - self._started
+        self.update(Text(f"{spinner} {self._label} {elapsed:.1f}s", style="grey62"))
+
+
+class ToolCallView(Static):
+    """工具调用活动组件：执行中 spinner 动画，完成后原地折叠为 ⏺/⎿ 两行。
+
+    pi 风格的生命周期：mount 即开始转圈（⏺ 位置是动画帧），
+    finish(preview) 后定格为 ⏺ name(args) + ⎿ 结果摘要，此后不再重绘。
+    """
+
+    def __init__(self, name: str, arguments: str) -> None:
+        super().__init__("")
+        self._name = name
+        self._arguments = arguments
+        self._preview: str | None = None
+        self._frame = 0
+
+    def on_mount(self) -> None:
+        self._tick()
+        self._timer = self.set_interval(_LOADER_INTERVAL, self._tick)
+
+    def _head(self, bullet: str, bullet_style: str) -> Text:
+        head = Text()
+        head.append(f"{bullet} ", style=bullet_style)
+        head.append(self._name or "?", style="bold")
+        head.append(f"({_format_args(self._arguments)})", style="grey42")
+        return head
+
+    def _tick(self) -> None:
+        if self._preview is not None:
+            return
+        spinner = _LOADER_FRAMES[self._frame % len(_LOADER_FRAMES)]
+        self._frame += 1
+        self.update(self._head(spinner, "cyan"))
+
+    def finish(self, preview: str) -> None:
+        """结果到达：定格为最终形态（⏺ 头行 + ⎿ 单行摘要）。"""
+        self._preview = preview
+        self._timer.stop()
+        final = self._head("⏺", "cyan")
+        one_line = " ⏎ ".join(preview.splitlines())
+        final.append("\n  ⎿  ", style="grey42")
+        final.append(one_line, style="grey62")
+        self.update(final)
+
+
 class TranscriptView(VerticalScroll):
-    """追加式 transcript：离散事件写 Static；流式正文聚合到一个 Markdown 块。"""
+    """追加式 transcript：线性流水线——完成的段冻结落卷，只有当前生长中的组件更新。
+
+    段序列按时间线性追加：Loader（等待期）→ reasoning（暗色）→ Markdown 正文段
+    → ToolCallView（活动组件）→ 下一轮 Loader…。历史段永不重排；
+    切割规则（fence 闭合 + 空行分界）由 stream_segments.StreamSegmenter 统一裁决。
+    """
 
     def __init__(self) -> None:
         super().__init__(id="transcript")
         self._blocks: list[str] = []
+        self._segments = StreamSegmenter()
         self._stream_widget: Markdown | None = None
-        self._stream_parts: list[str] = []
         self._stream_dirty = False
         self._stream_pending_chars = 0
         self._stream_last_flush = 0.0
+        self._loader: Loader | None = None
+        self._active_tools: list[ToolCallView] = []
         self._reasoning_widget: Static | None = None
         self._reasoning_text = ""
         self._reasoning_chars = 0
@@ -107,10 +169,12 @@ class TranscriptView(VerticalScroll):
     def clear(self) -> None:
         self._blocks.clear()
         self.remove_children()
+        self._segments = StreamSegmenter()
         self._stream_widget = None
-        self._stream_parts = []
         self._stream_dirty = False
         self._stream_pending_chars = 0
+        self._loader = None
+        self._active_tools = []
         self._reasoning_widget = None
         self._reasoning_text = ""
         self._reasoning_chars = 0
@@ -122,28 +186,46 @@ class TranscriptView(VerticalScroll):
         self.mount(Static(renderable))
         self.anchor()
 
+    # ---- 等待期 loader ----
+
+    def _show_loader(self, label: str = "思考中…") -> None:
+        self._dismiss_loader()
+        self._loader = Loader(label)
+        self.mount(self._loader)
+        self.anchor()
+
+    def _dismiss_loader(self) -> None:
+        if self._loader is not None:
+            self._loader.remove()
+            self._loader = None
+
+    # ---- 正文流式段 ----
+
     def begin_stream(self) -> None:
-        self._stream_parts = []
+        """一轮 API 响应开始：挂 loader，等首个 delta 到达再替换成正文组件。"""
+        self._segments = StreamSegmenter()
+        self._stream_widget = None
         self._stream_dirty = False
         self._stream_pending_chars = 0
         self._stream_last_flush = time.monotonic()
-        self._stream_widget = Markdown("")
-        self.mount(self._stream_widget)
-        self.anchor()
+        self._show_loader()
+
+    def _ensure_stream_widget(self) -> None:
+        if self._stream_widget is None:
+            self._dismiss_loader()
+            self._stream_widget = Markdown("")
+            self.mount(self._stream_widget)
+            self._schedule_flush()
 
     def _flush_stream(self) -> None:
         if self._stream_widget is None or not self._stream_dirty:
             return
-        full = "".join(self._stream_parts)
-        done, tail = _split_complete(full)
+        done = self._segments.take_completed()
         if done:
-            # 完成块永久落卷（插在流式块之前），尾部继续增量重排
+            # 完成段永久落卷（插在流式段之前），尾段继续增量重排
             self._blocks.append(done)
             self.mount(Markdown(done), before=self._stream_widget)
-            self._stream_parts = [tail]
-            self._stream_widget.update(tail)
-        else:
-            self._stream_widget.update(full)
+        self._stream_widget.update(self._segments.tail)
         self._stream_dirty = False
         self._stream_pending_chars = 0
         self._stream_last_flush = time.monotonic()
@@ -162,10 +244,8 @@ class TranscriptView(VerticalScroll):
         self.set_timer(_STREAM_FLUSH_INTERVAL, flush_and_reschedule)
 
     def append_text(self, text: str) -> None:
-        if self._stream_widget is None:
-            self.begin_stream()
-            self._schedule_flush()
-        self._stream_parts.append(text)
+        self._ensure_stream_widget()
+        self._segments.feed(text)
         self._stream_dirty = True
         self._stream_pending_chars += len(text)
         if (
@@ -176,6 +256,7 @@ class TranscriptView(VerticalScroll):
 
     def append_reasoning(self, text: str) -> None:
         if self._reasoning_widget is None:
+            self._dismiss_loader()
             self._reasoning_widget = Static("", classes="reasoning")
             self.mount(self._reasoning_widget)
         remaining = max(0, _REASONING_PREVIEW_LIMIT - self._reasoning_chars)
@@ -188,14 +269,41 @@ class TranscriptView(VerticalScroll):
             self._reasoning_widget.update(Text(self._reasoning_text, style="grey42 italic"))
         self.anchor()
 
+    # ---- 工具调用活动组件 ----
+
+    def begin_tool_call(self, name: str, arguments: str) -> None:
+        """ToolCallStart：挂活动组件，执行期间转圈。"""
+        self._dismiss_loader()
+        widget = ToolCallView(name, arguments)
+        self._active_tools.append(widget)
+        self._blocks.append(f"⏺ {name}({_format_args(arguments)})")
+        self.mount(widget)
+        self.anchor()
+
+    def finish_tool_call(self, preview: str) -> None:
+        """ToolCallResult：最旧的活动组件定格为 ⏺/⎿（工具按序执行，FIFO 配对）。"""
+        if not self._active_tools:
+            # 防御：无配对 start（异常路径）时退化为静态行，内容不丢
+            rendered = render_event(ToolCallResult("?", preview))
+            if rendered is not None:
+                self.write(rendered)
+            return
+        widget = self._active_tools.pop(0)
+        widget.finish(preview)
+        self._blocks.append(f"  ⎿  {preview}")
+        self.anchor()
+
+    # ---- 收尾 ----
+
     def finish_stream(self) -> None:
+        self._dismiss_loader()  # 整轮无正文（纯工具调用）时 loader 不能残留
         self._flush_stream()
         if self._stream_widget is not None:
-            self._blocks.append("".join(self._stream_parts))
+            self._blocks.append(self._segments.tail)
         if self._reasoning_truncated and self._reasoning_widget is not None:
             self._reasoning_widget.update(Text(self._reasoning_text + " …", style="grey42 italic"))
+        self._segments = StreamSegmenter()
         self._stream_widget = None
-        self._stream_parts = []
         self._stream_dirty = False
         self._stream_pending_chars = 0
         self._reasoning_widget = None
@@ -608,7 +716,11 @@ class MiniAgentApp(App):
             self.transcript.append_text(event.text)
         elif isinstance(event, StreamFinished):
             self.transcript.finish_stream()
-        elif isinstance(event, (ToolCallStart, ToolCallResult, Note, Warn, Usage)):
+        elif isinstance(event, ToolCallStart):
+            self.transcript.begin_tool_call(event.name, event.arguments)
+        elif isinstance(event, ToolCallResult):
+            self.transcript.finish_tool_call(event.preview)
+        elif isinstance(event, (Note, Warn, Usage)):
             rendered = render_event(event)
             if rendered is not None:
                 self.transcript.write(rendered)
