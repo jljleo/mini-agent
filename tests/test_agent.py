@@ -258,11 +258,14 @@ class TestParallelToolCallInjectionOrder:
 class TestAutoCompact:
     def test_high_water_triggers_truncation(self, session, monkeypatch):
         """轮边界上下文超 HIGH 水位时自动触发 L1/L2 压缩，发送给 API 的 payload 变小。"""
+        # 默认 kimi-k3 是 1M 窗口，故意切到 deepseek 64K 小窗口，让测试数据能触发截断
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+        session.set_profile("deepseek")
         stub_chat_network(session, monkeypatch)
         monkeypatch.setattr(agent, "stream_and_assemble",
                             canned([{"role": "assistant", "content": "完成"}]))
 
-        # 塞一段远超 HIGH 水位（100K tokens）的历史
+        # 塞一段远超 deepseek HIGH 水位（36K tokens）的历史
         for _i in range(60):
             session.messages.append({"role": "user", "content": "x" * 5000})
             session.messages.append({"role": "assistant", "content": "y" * 5000})
@@ -373,16 +376,21 @@ class TestAgentsMdInjection:
 class TestStatusText:
     """状态栏比例样式（pi 同款）：ctx 占用% / 窗口 · 会话累计 tokens。"""
 
-    def test_percentage_uses_last_prompt_tokens(self, session):
+    def test_percentage_uses_last_prompt_tokens(self, session, monkeypatch):
+        # 切到小窗口档案，避免默认 1M 窗口把百分比压得太小
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+        session.set_profile("deepseek")
         # 占用 = 最近一次请求的真实 prompt tokens / 窗口，不是会话累计（截断后会失真）
-        session.last_prompt_tokens = 12_800  # kimi 128K 窗口的 10%
+        session.last_prompt_tokens = 6_400  # deepseek 64K 窗口的 10%
         session.total_prompt_tokens = 99_999
         session.total_completion_tokens = 1
-        assert "ctx 10.0%/128K" in session.status_text()
+        assert "ctx 10.0%/64K" in session.status_text()
         assert "tokens 100,000" in session.status_text()
 
-    def test_first_turn_falls_back_to_estimate(self, session):
+    def test_first_turn_falls_back_to_estimate(self, session, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+        session.set_profile("deepseek")
         # 尚无真实 usage 时退化为投影估算，且不为 0（system 模板本身占上下文）
         text = session.status_text()
         assert "ctx 0.0%" not in text
-        assert "%/128K" in text
+        assert "%/64K" in text

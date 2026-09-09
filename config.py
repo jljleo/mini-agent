@@ -23,13 +23,61 @@ SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/re
 #
 # 用户也可以在项目根 models.json 中覆盖内置档案或新增档案，格式示例：
 #   {"deepseek": {"model": "deepseek-chat", "base_url": "...", "api_key_env": "...", "context_tokens": 64000}}
+# 内置档案：从各提供商官方 API / 文档拉取的真实模型列表。
+# Moonshot 模型列表来自 https://api.moonshot.cn/v1/models（2026-09-09）。
 MODEL_PROFILES = {
+    # --- Moonshot / Kimi（通用 API：api.moonshot.cn） ---
     "kimi": {
         "model": "kimi-k3",
         "base_url": "https://api.moonshot.cn/v1",
         "api_key_env": "MOONSHOT_API_KEY",
-        "context_tokens": 128_000,
+        "context_tokens": 1_048_576,
     },
+    "kimi-k2.7-code": {
+        "model": "kimi-k2.7-code",
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "context_tokens": 262_144,
+    },
+    "kimi-k2.7-code-highspeed": {
+        "model": "kimi-k2.7-code-highspeed",
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "context_tokens": 262_144,
+    },
+    "kimi-k2.6": {
+        "model": "kimi-k2.6",
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "context_tokens": 262_144,
+    },
+    # --- Kimi Code（coding API：api.kimi.com/coding/v1） ---
+    # 规格来源：https://www.kimi.com/code/docs/kimi-code/models.html
+    "kimi-code": {
+        "model": "k3",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "api_key_env": "KIMI_CODE_API_KEY",
+        "context_tokens": 1_048_576,
+    },
+    "kimi-code-256k": {
+        "model": "k3-256k",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "api_key_env": "KIMI_CODE_API_KEY",
+        "context_tokens": 256_000,
+    },
+    "kimi-code-k2.7": {
+        "model": "kimi-for-coding",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "api_key_env": "KIMI_CODE_API_KEY",
+        "context_tokens": 256_000,
+    },
+    "kimi-code-k2.7-highspeed": {
+        "model": "kimi-for-coding-highspeed",
+        "base_url": "https://api.kimi.com/coding/v1",
+        "api_key_env": "KIMI_CODE_API_KEY",
+        "context_tokens": 256_000,
+    },
+    # --- 其他兼容 OpenAI 协议的提供商 ---
     "deepseek": {
         "model": "deepseek-chat",
         "base_url": "https://api.deepseek.com/v1",

@@ -100,7 +100,10 @@ class TestCompact:
 
     def test_compacts_with_summary_and_archives(self, session, monkeypatch, capsys):
         """手动压缩：中段换成摘要、原文归档、落盘。"""
-        # 造一个超过 LOW 水位（60K tokens ≈ 120K 字符）的历史
+        # 默认 kimi-k3 是 1M 窗口，切到 deepseek 64K 让测试数据能超过 LOW 水位
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+        session.set_profile("deepseek")
+        # 造一个超过 deepseek LOW 水位（~21K tokens ≈ 42K 字符）的历史
         session.messages.append({"role": "user", "content": "最初任务"})
         session.messages.append({"role": "assistant", "content": "首次回应"})
         for _i in range(25):
@@ -120,6 +123,8 @@ class TestCompact:
         assert os.path.exists(agent.SESSION_FILE)  # 突变后立即落盘
 
     def test_summary_failure_falls_back_to_marker(self, session, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+        session.set_profile("deepseek")
         session.messages.append({"role": "user", "content": "最初任务"})
         session.messages.append({"role": "assistant", "content": "首次回应"})
         for _i in range(25):

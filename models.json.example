@@ -10,5 +10,17 @@
     "base_url": "http://localhost:11434/v1",
     "api_key_env": "LOCAL_API_KEY",
     "context_tokens": 128000
+  },
+  "kimi-code": {
+    "model": "k3",
+    "base_url": "https://api.kimi.com/coding/v1",
+    "api_key_env": "KIMI_CODE_API_KEY",
+    "context_tokens": 1048576
+  },
+  "kimi-code-256k": {
+    "model": "k3-256k",
+    "base_url": "https://api.kimi.com/coding/v1",
+    "api_key_env": "KIMI_CODE_API_KEY",
+    "context_tokens": 256000
   }
 }
