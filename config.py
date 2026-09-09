@@ -17,108 +17,49 @@ HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历
 SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/resume 恢复用）
 
 # --- 模型（多模型档案）---
-# 任何兼容 OpenAI Chat Completions 协议的提供商都能接入：在下面加一行档案即可。
-# 用环境变量 MINI_AGENT_MODEL 选择档案（默认 kimi）。context_tokens 按官方文档填——
-# 它是 L1 截断水位的依据（见下文 TRUNCATE_HIGH_TOKENS）：填小了只是更保守，填大了会爆窗。
-#
-# 用户也可以在项目根 models.json 中覆盖内置档案或新增档案，格式示例：
-#   {"deepseek": {"model": "deepseek-chat", "base_url": "...", "api_key_env": "...", "context_tokens": 64000}}
-# 内置档案：从各提供商官方 API / 文档拉取的真实模型列表。
-# Moonshot 模型列表来自 https://api.moonshot.cn/v1/models（2026-09-09）。
-MODEL_PROFILES = {
-    # --- Moonshot / Kimi（通用 API：api.moonshot.cn） ---
-    "kimi": {
-        "model": "kimi-k3",
-        "base_url": "https://api.moonshot.cn/v1",
-        "api_key_env": "MOONSHOT_API_KEY",
-        "context_tokens": 1_048_576,
-    },
-    "kimi-k2.7-code": {
-        "model": "kimi-k2.7-code",
-        "base_url": "https://api.moonshot.cn/v1",
-        "api_key_env": "MOONSHOT_API_KEY",
-        "context_tokens": 262_144,
-    },
-    "kimi-k2.7-code-highspeed": {
-        "model": "kimi-k2.7-code-highspeed",
-        "base_url": "https://api.moonshot.cn/v1",
-        "api_key_env": "MOONSHOT_API_KEY",
-        "context_tokens": 262_144,
-    },
-    "kimi-k2.6": {
-        "model": "kimi-k2.6",
-        "base_url": "https://api.moonshot.cn/v1",
-        "api_key_env": "MOONSHOT_API_KEY",
-        "context_tokens": 262_144,
-    },
-    # --- Kimi Code（coding API：api.kimi.com/coding/v1） ---
-    # 规格来源：https://www.kimi.com/code/docs/kimi-code/models.html
-    "kimi-code": {
-        "model": "k3",
-        "base_url": "https://api.kimi.com/coding/v1",
-        "api_key_env": "KIMI_CODE_API_KEY",
-        "context_tokens": 1_048_576,
-    },
-    "kimi-code-256k": {
-        "model": "k3-256k",
-        "base_url": "https://api.kimi.com/coding/v1",
-        "api_key_env": "KIMI_CODE_API_KEY",
-        "context_tokens": 256_000,
-    },
-    "kimi-code-k2.7": {
-        "model": "kimi-for-coding",
-        "base_url": "https://api.kimi.com/coding/v1",
-        "api_key_env": "KIMI_CODE_API_KEY",
-        "context_tokens": 256_000,
-    },
-    "kimi-code-k2.7-highspeed": {
-        "model": "kimi-for-coding-highspeed",
-        "base_url": "https://api.kimi.com/coding/v1",
-        "api_key_env": "KIMI_CODE_API_KEY",
-        "context_tokens": 256_000,
-    },
-    # --- 其他兼容 OpenAI 协议的提供商 ---
-    "deepseek": {
-        "model": "deepseek-chat",
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "context_tokens": 64_000,
-    },
-    "qwen": {
-        "model": "qwen-plus",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key_env": "DASHSCOPE_API_KEY",
-        "context_tokens": 131_072,
-    },
-}
-
+# 所有兼容 OpenAI Chat Completions 协议的提供商都在 JSON 文件里配置：
+#   - models.default.json：仓库内置默认档案（可提交）
+#   - models.json：用户本地覆盖/新增档案（gitignored）
+# 格式：顶层对象，键为档案名，值为 {"model", "base_url", "api_key_env", "context_tokens"}。
+_DEFAULT_MODELS_JSON = os.path.join(PROJECT_ROOT, "models.default.json")
 _USER_MODELS_JSON = os.path.join(PROJECT_ROOT, "models.json")
 
 
-def _load_user_profiles(path: str = _USER_MODELS_JSON) -> dict:
-    """加载项目根 models.json 中的用户自定义模型档案；失败时返回空字典并警告。"""
+def _load_profiles_from_file(path: str) -> dict:
+    """加载 JSON 模型档案文件；失败时返回空字典并警告。"""
     if not os.path.exists(path):
         return {}
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"警告：models.json 加载失败: {exc}", file=sys.stderr)
+        print(f"警告：{path} 加载失败: {exc}", file=sys.stderr)
         return {}
     if not isinstance(data, dict):
-        print("警告：models.json 顶层必须是对象", file=sys.stderr)
+        print(f"警告：{path} 顶层必须是对象", file=sys.stderr)
         return {}
     return data
+
+
+def refresh_default_profiles() -> None:
+    """重新加载默认模型档案（models.default.json）。"""
+    global MODEL_PROFILES
+    MODEL_PROFILES = _load_profiles_from_file(_DEFAULT_MODELS_JSON)
+    if not MODEL_PROFILES:
+        raise SystemExit(
+            f"默认模型档案文件 {_DEFAULT_MODELS_JSON} 缺失或为空，"
+            "请从 models.json.example 复制或恢复仓库文件"
+        )
 
 
 def refresh_user_profiles(path: str | None = None) -> None:
     """重新加载用户模型档案；path 缺省使用项目根 models.json。"""
     global USER_PROFILES
-    USER_PROFILES = _load_user_profiles(path or _USER_MODELS_JSON)
+    USER_PROFILES = _load_profiles_from_file(path or _USER_MODELS_JSON)
 
 
 def get_profile(name: str) -> dict:
-    """解析并归一化单个模型档案（用户档案覆盖内置档案）。
+    """解析并归一化单个模型档案（用户档案覆盖默认档案）。
 
     返回字典包含：model, base_url, api_key_env, context_tokens,
     truncate_high_tokens, truncate_low_tokens。
@@ -148,7 +89,7 @@ def get_profile(name: str) -> dict:
 
 
 def list_profiles() -> list[str]:
-    """返回所有可用档案名（内置 + 用户覆盖/新增）。"""
+    """返回所有可用档案名（默认 + 用户覆盖/新增）。"""
     return list({**MODEL_PROFILES, **USER_PROFILES})
 
 
@@ -166,7 +107,9 @@ def apply_profile(name: str) -> None:
     TRUNCATE_LOW_TOKENS = profile["truncate_low_tokens"]
 
 
+MODEL_PROFILES: dict = {}
 USER_PROFILES: dict = {}
+refresh_default_profiles()
 refresh_user_profiles()
 
 MODEL_PROFILE = os.environ.get("MINI_AGENT_MODEL", "kimi")
@@ -176,7 +119,7 @@ except KeyError as exc:
     available = ", ".join(list_profiles())
     raise SystemExit(
         f"未知模型档案 {MODEL_PROFILE!r}（MINI_AGENT_MODEL），"
-        f"可选：{available}；新提供商请在 config.MODEL_PROFILES 或 models.json 添加"
+        f"可选：{available}；新提供商请在 models.default.json 或 models.json 添加"
     ) from exc
 
 
