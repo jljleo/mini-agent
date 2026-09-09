@@ -223,7 +223,7 @@ class Dock(Vertical):
         yield Static("", id="queued")
         yield Static(f"{MODEL} · ctx 0.0%/{format_context_tokens()} · tokens 0", id="status")
         yield OptionList(id="completion")
-        yield Input(placeholder="输入问题开始对话 · /help 查看命令", id="prompt")
+        yield Input(placeholder="输入 / 查看命令 · 问题直接开始对话", id="prompt")
 
     def on_mount(self) -> None:
         self.query_one("#approval", Static).display = False
@@ -513,7 +513,7 @@ class MiniAgentApp(App):
             self._run_slash_command(name, args.strip())
             return True
         if question.startswith("/") and "/" not in name[1:]:
-            self.transcript.write(Text(f"未知命令: {name}（输入 /help 查看可用命令）", style="yellow"))
+            self.transcript.write(Text(f"未知命令: {name}（输入 / 查看命令）", style="yellow"))
             return "prefill"
         return False
 

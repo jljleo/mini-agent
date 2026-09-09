@@ -31,10 +31,10 @@ def _dispatch_command(session: ChatSession, question: str, forced: bool):
     if not forced and name in COMMANDS:
         COMMANDS[name](session, args.strip())  # handler 统一接收 (session, args)
         return True
-    # 未知斜杠命令拦截——但只在“看起来真的是命令”时：命令名是单个词（/help），
+    # 未知斜杠命令拦截——但只在“看起来真的是命令”时：命令名是单个词（/clear），
     # 首个 token 内含其他 / 的是绝对路径（/Users/x.py 提问），应放行给模型
     if not forced and question.startswith("/") and "/" not in name[1:]:
-        ui.warn(f"未知命令: {name}（输入 /help 查看可用命令）")
+        ui.warn(f"未知命令: {name}（输入 / 查看命令）")
         return "prefill"
     return False
 

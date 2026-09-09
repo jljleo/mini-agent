@@ -156,12 +156,15 @@ class ChatSession:
         请求的真实 prompt tokens（compact 截断后的投影大小），首轮前退化为估算。
         累计 tokens 是另一码事（会话总消耗），不拿它除窗口——截断后会失真。
         """
-        total = self.total_prompt_tokens + self.total_completion_tokens
+        prompt = self.total_prompt_tokens
+        completion = self.total_completion_tokens
+        total = prompt + completion
         used = self.last_prompt_tokens or estimate_total_tokens(self.messages)
         pct = used / self.profile["context_tokens"] * 100
         return (
             f"{self.profile['model']} · ctx {pct:.1f}%/"
-            f"{format_context_tokens(self.profile['context_tokens'])} · tokens {total:,}"
+            f"{format_context_tokens(self.profile['context_tokens'])} · "
+            f"tokens {prompt:,}+{completion:,}={total:,}"
         )
 
     # ---- 历史管理 ----

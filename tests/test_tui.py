@@ -80,9 +80,10 @@ class FakeSession:
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.messages = []
+        self.profile_name = "kimi"
 
     def status_text(self):
-        return "kimi-k3 · tokens 0"
+        return "kimi-k3 · ctx 0.0%/1.0M · tokens 0+0=0"
 
     def mark(self):
         return len(self.messages)
@@ -232,18 +233,18 @@ def test_main_dispatches_tty_to_textual(monkeypatch):
     assert "tui" in called
 
 
-def test_slash_command_help_renders_into_transcript():
+def test_slash_command_model_renders_into_transcript():
     # 回归：tui 必须自行 import commands 触发注册，不能依赖 main.py 的副作用导入
     from tui import MiniAgentApp
 
     async def scenario():
         app = MiniAgentApp(session=FakeSession())
         async with app.run_test() as pilot:
-            app.submit_text("/help")
+            app.submit_text("/model")
             await pilot.pause()
 
             content = app.transcript.text_content()
-            assert "/compact" in content
+            assert "kimi" in content
             assert "未知命令" not in content
 
     run(scenario())
@@ -313,7 +314,7 @@ def test_slash_command_completion_shows_and_hides():
             await pilot.pause()
             assert completion.display is True
             assert completion.option_count > 0
-            completion.get_option("/help")  # /help 应在候选里
+            completion.get_option("/clear")  # /clear 应在候选里
 
             prompt.value = "普通问题"
             await pilot.pause()

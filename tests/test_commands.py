@@ -10,7 +10,7 @@ import pytest
 import agent
 import commands
 import tools
-from commands import cmd_clear, cmd_compact, cmd_model, cmd_resume, cmd_tokens
+from commands import cmd_clear, cmd_compact, cmd_model, cmd_resume
 
 
 @pytest.fixture(autouse=True)
@@ -38,14 +38,6 @@ class TestClear:
 
     def test_clear_on_fresh_session_no_crash(self, session):
         cmd_clear(session)  # 无存档无 todo：幂等不炸
-
-
-class TestTokens:
-    def test_renders_dashboard(self, session, capsys):
-        session.total_prompt_tokens = 1000
-        cmd_tokens(session)
-        out = capsys.readouterr().out
-        assert "1,000" in out and "tokens" in out
 
 
 class TestResume:

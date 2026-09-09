@@ -128,5 +128,5 @@ class TestCommandRegistry:
 
     def test_core_commands_registered(self):
         import commands  # noqa: F401
-        for name in ("/help", "/clear", "/tokens", "/tools", "/resume", "/compact"):
+        for name in ("/clear", "/resume", "/model", "/compact"):
             assert name in command_registry.COMMANDS
