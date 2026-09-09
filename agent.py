@@ -158,18 +158,18 @@ class ChatSession:
         """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。
 
         ctx 占比 = 当前历史消息占用的窗口比例（pi 同款比例样式）。
-        优先用 current_context_tokens（最近一次 API 响应后真实落盘的消息体积 =
-        prompt + completion）；还没有任何 API 请求时退化为估算。
+        current = 当前历史消息的真实 token 数（最近一次 API 响应后落盘体积 =
+        prompt + completion）；无响应时回退到估算。
+        spent = 会话累计 API 消耗（含已被截断/丢弃的旧消息，会虚高）。
+        两者分开展示，避免把累计消耗误当成当前窗口占用。
         """
-        prompt = self.total_prompt_tokens
-        completion = self.total_completion_tokens
-        total = prompt + completion
-        used = self.current_context_tokens or estimate_total_tokens(self.messages)
-        pct = used / self.profile["context_tokens"] * 100
+        current = self.current_context_tokens or estimate_total_tokens(self.messages)
+        spent = self.total_prompt_tokens + self.total_completion_tokens
+        pct = current / self.profile["context_tokens"] * 100
         return (
             f"{self.profile['model']} · ctx {pct:.1f}%/"
             f"{format_context_tokens(self.profile['context_tokens'])} · "
-            f"prompt {format_tokens(prompt)} · completion {format_tokens(completion)} · total {format_tokens(total)}"
+            f"current {format_tokens(current)} · spent {format_tokens(spent)}"
         )
 
     # ---- 历史管理 ----
