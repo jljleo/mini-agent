@@ -40,11 +40,13 @@ PROJECT_ROOT = _CONFIG_PROJECT_ROOT
 
 @tool(
     "search_tools",
-    "Search for additional (non-resident) tools beyond the ones already "
-    "declared. Only needed when existing tools cannot do the job.",
+    "List newly discoverable tools that are not yet resident, so you can call them after retrieval. "
+    "Takes NO arguments — call it with an empty object {}. "
+    "If nothing is available it will tell you explicitly; then just use the resident tools.",
     {},
+    [],
 )
-def search_tools() -> str:
+def search_tools(**_ignored) -> str:
     """返回可发现（非常驻名单外）工具的声明，供模型检索后调用。
 
     当前没有可发现工具时明确告知——空列表会让模型困惑（“是不是检索失败了”）。
@@ -52,6 +54,8 @@ def search_tools() -> str:
     无自我引用问题（旧设计需手写 schema 特殊处理，名单制后与普通工具无异）。
     子 agent 上下文里额外过滤元工具（todo_write/todo_read 防覆盖主会话清单；
     spawn_subagent 已常驻主 agent，子 agent 工具表本就不含它，此处作为冗余兜底）。
+    签名收 **_ignored：E5 实测模型偶发带 query 参数误调（schema 无该参数），
+    多余的参数宁可忽略也不能抛 TypeError 让整轮作废（一次工具误调导致会话放弃）。
     """
     extended = get_extended_tool_schemas()
     if _in_subagent():
