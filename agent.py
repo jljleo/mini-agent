@@ -153,14 +153,14 @@ class ChatSession:
     def status_text(self) -> str:
         """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。
 
-        ctx 占比 = 当前上下文占用 / 窗口（pi 同款比例样式）：占用优先取最近一次
-        请求的真实 prompt tokens（compact 截断后的投影大小），首轮前退化为估算。
-        累计 tokens 是另一码事（会话总消耗），不拿它除窗口——截断后会失真。
+        ctx 占比 = 当前历史消息占用的窗口比例（pi 同款比例样式）。
+        用 estimate_total_tokens(self.messages) 而不是累计消耗，是因为累计 tokens
+        包含已被截断/丢弃的旧消息，会虚高；当前消息列表才是真实窗口占用。
         """
         prompt = self.total_prompt_tokens
         completion = self.total_completion_tokens
         total = prompt + completion
-        used = self.last_prompt_tokens or estimate_total_tokens(self.messages)
+        used = estimate_total_tokens(self.messages)
         pct = used / self.profile["context_tokens"] * 100
         return (
             f"{self.profile['model']} · ctx {pct:.1f}%/"

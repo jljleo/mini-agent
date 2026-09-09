@@ -375,11 +375,11 @@ class TestAgentsMdInjection:
 class TestStatusText:
     """状态栏比例样式（pi 同款）：ctx 占用% / 窗口 · 会话累计 tokens。"""
 
-    def test_percentage_uses_last_prompt_tokens(self, session, small_context_profile, monkeypatch):
+    def test_percentage_uses_current_messages(self, session, small_context_profile, monkeypatch):
         # 切到小窗口档案，避免默认 1M 窗口把百分比压得太小
         session.set_profile(small_context_profile)
-        # 占用 = 最近一次请求的真实 prompt tokens / 窗口，不是会话累计（截断后会失真）
-        session.last_prompt_tokens = 6_400  # 64K 窗口的 10%
+        # 只保留一条 12,800 字符的消息（按 2.0 字符/token ≈ 6,400 tokens = 64K 窗口的 10%）
+        session.messages = [{"role": "user", "content": "x" * 12_800}]
         session.total_prompt_tokens = 99_999
         session.total_completion_tokens = 1
         assert "ctx 10.0%/64K" in session.status_text()
