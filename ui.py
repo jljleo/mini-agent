@@ -3,13 +3,19 @@
 设计：
     - 单一 Console + 语义化 Theme：业务代码只调 banner/warn/tool_call 等语义接口，
       不再散落 \\033 转义码；调整配色只改 THEME 一处
-    - StreamRenderer：一轮 API 响应的渲染管线——spinner（等首字）→
-      思考过程暗色预览 → 正文 Markdown 流式渲染（Live 增量重排）
+    - StreamRenderer：一轮 API 响应的渲染管线——spinner（等首字，思考期间计数）→
+      正文 Markdown 流式渲染（Live 增量重排）；思考原文不流出（折叠为一行计数）
     - 工具调用可视化采用 Claude Code 风格 ⏺ / ⎿：美观之外仍是"幻觉测谎仪"
     - 非 tty（管道/重定向）自动降级为纯文本直出：rich 自动去色，
       Live/spinner 不启用，管道输出保持干净可解析
 
 动态文本一律用 Text/markup=False 渲染，杜绝模型输出里的 "[xxx]" 被当 markup 解析。
+
+两个反凌乱决策（2026-09，真实 tty transcript 驱动）：
+    - 思考原文不流出：碎片化的内部独白（多轮 reasoning 在渲染态切换时裸 print 的
+      残片）是 tty 最大的乱源；折叠为「✻ 思考 N 字」一行，完整推理仍进历史/轨迹
+    - Usage 缓存到 TurnEnd 只打一次累计行：一轮对话 N 个 API 请求打 N 行 token 是
+      第二乱源
 """
 
 from __future__ import annotations
@@ -59,9 +65,6 @@ console = Console(theme=THEME, highlight=False)
 # stderr 专用：import 期告警等开发者向消息不污染 stdout 管道
 err_console = Console(theme=THEME, highlight=False, stderr=True)
 
-# 思考过程（reasoning）在终端最多展示的字符数，超出以 " …" 收尾。
-# 仅影响显示：写入消息历史的完整推理不受影响（streaming.py 负责拼装）
-REASONING_PREVIEW_CHARS = 600
 # Markdown Live 重渲染的最小间隔（秒）：流式 chunk 很密，每片都全量重排是 O(n²) 抖动源
 LIVE_RENDER_INTERVAL = 0.08
 # 工具调用参数值在 ⏺ 行内的回显长度上限
@@ -191,26 +194,22 @@ def confirm_prompt_text(command: str, dangerous: bool, timeout: int) -> str:
 class StreamRenderer:
     """一轮 API 响应的渲染管线。
 
-    两种 tty 形态 + 管道降级：
-    - live=True（默认，旧式回合制）：spinner → 思考暗色预览 → 正文 Markdown Live 增量重排
-    - live=False（常驻输入框模式）：patch_stdout 下不能用光标重绘——
-      思考逐块暗色直出；正文按块（空行分界）落卷渲染 Markdown，未闭合尾部
-      等 StreamFinished 收尾渲染。牺牲逐字重排，换输入框常驻
+    两种形态：
+    - tty：spinner（等首字；思考期间显示计字数作活动信号）→ 正文 Markdown Live 增量重排
     - 非 tty：纯文本直出
     """
 
-    def __init__(self, live: bool = True) -> None:
+    def __init__(self) -> None:
         self._plain = not console.is_terminal
-        self._live_ok = live and not self._plain
         self._status = None
         self._live: Live | None = None
         self._segments = StreamSegmenter()  # 完成段落卷 + 进行中尾部的唯一切割来源
         self._last_render = 0.0
-        self._reasoning_shown = 0
-        self._reasoning_truncated = False
+        self._reasoning_chars = 0
+        self._reasoning_noted = False
 
     def __enter__(self) -> StreamRenderer:
-        if self._live_ok:
+        if not self._plain:
             self._status = console.status("[faint]思考中…[/]", spinner="dots")
             self._status.start()
         return self
@@ -220,25 +219,21 @@ class StreamRenderer:
             self._status.stop()
             self._status = None
 
-    # streaming.py 的回调（chunk 到达即触发）
+    def _note_reasoning(self) -> None:
+        """思考折叠行：一轮只落一次（首个正文到达时，或整轮无正文时的收尾）。"""
+        if self._reasoning_chars and not self._reasoning_noted and not self._plain:
+            console.print(f"✻ 思考 {self._reasoning_chars} 字", style="faint", markup=False)
+            self._reasoning_noted = True
 
     def on_reasoning(self, text: str) -> None:
-        """思考过程：暗色斜体流式预览，超上限截断（完整内容仍进消息历史）。
+        """思考过程：不流出原文（碎片化的内部独白是 tty 最大乱源），只计数。
 
-        管道模式下不输出：stdout 只保留正文答案，重定向结果干净可解析。
+        完整推理仍进消息历史/轨迹（streaming.py 负责拼装），终端只留一行折叠摘要。
+        管道模式完全静默：stdout 只保留正文答案，重定向结果干净可解析。
         """
-        self._stop_spinner()
-        if self._plain:
-            return
-        if self._reasoning_shown >= REASONING_PREVIEW_CHARS:
-            self._reasoning_truncated = True
-            return
-        remaining = REASONING_PREVIEW_CHARS - self._reasoning_shown
-        chunk = text[:remaining]
-        self._reasoning_shown += len(chunk)
-        if len(chunk) < len(text):
-            self._reasoning_truncated = True
-        console.print(chunk, end="", style="reasoning", markup=False, soft_wrap=True)
+        self._reasoning_chars += len(text)
+        if self._status is not None:
+            self._status.update(f"[faint]思考中…（{self._reasoning_chars} 字）[/]")
 
     def _land_completed(self) -> None:
         """把已完成的段永久落卷轴，Live 只保留进行中的尾段。
@@ -248,12 +243,8 @@ class StreamRenderer:
         每次刷新都在下方留下一份完整副本——长回答会随节流刷新重复几十次。
         落卷后 Live 区域永远只有一个段的高度，从机制上杜绝超高重绘。
 
-        非 Live（常驻输入框）模式下，落卷就是唯一的渲染方式：
-        段完成即渲染 Markdown，尾部等收尾。
-
         切割规则（fence 闭合 + 空行分界）收敛在 stream_segments.StreamSegmenter。
-        Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）；
-        patch_stdout 下则被抬升到输入框上方——两种形态共用这一行。
+        Live 运行中的 console.print 会被 rich 渲染到 Live 区域上方（官方支持的模式）。
         """
         done = self._segments.take_completed()
         if not done:
@@ -264,15 +255,14 @@ class StreamRenderer:
         self._last_render = time.monotonic()
 
     def on_content(self, text: str) -> None:
-        """正文：Live 模式增量重排尾段；常驻输入框模式只落卷完成段；管道纯文本直出。"""
-        self._stop_spinner()
+        """正文：tty Live 增量重排尾段；管道纯文本直出。"""
         if self._plain:
             print(text, end="", flush=True)
             return
-        if self._live_ok and self._live is None:
-            if self._reasoning_shown:
-                # 思考与正文之间留白；被截断的思考以省略号收尾
-                console.print(" …" if self._reasoning_truncated else "")
+        if self._live is None:
+            # 首个正文 delta：收 spinner、落思考折叠行、起 Live
+            self._stop_spinner()
+            self._note_reasoning()
             self._live = Live(
                 Markdown(""),
                 console=console,
@@ -297,19 +287,15 @@ class StreamRenderer:
             self._live.stop()
             self._live = None
             console.print()
-        elif tail:
-            # 常驻输入框模式：收尾把未闭合的尾段渲染出来
-            console.print(Markdown(tail))
-            console.print()
-        elif self._reasoning_shown:
-            console.print(" …" if self._reasoning_truncated else "")
+        else:
+            self._note_reasoning()  # 整轮无正文（纯工具调用）：折叠行在此落地
         return False
 
 
 # ---- 事件消费（agent 内核事件流 → 终端渲染的桥）----
 
 
-def consume(events, *, live: bool = True) -> None:
+def consume(events) -> None:
     """终端消费者：把 agent 内核产出的事件流渲染到终端。
 
     内核（agent.py / streaming.py）不再 import ui——它是事件的生产者，
@@ -317,14 +303,15 @@ def consume(events, *, live: bool = True) -> None:
     StreamRenderer 的生命周期由 StreamStart / StreamFinished 事件驱动；
     异常（如 Ctrl+C）也要收掉渲染器，防 Live 区域残留在终端上。
 
-    live=False：常驻输入框模式（patch_stdout 下禁用光标重绘），
-    正文按块落卷渲染而非逐字重排。
+    Usage 事件缓存到 TurnEnd 只打印一次累计行——一轮对话 N 个 API 请求
+    打 N 行 token 是 tty 的第二乱源。
     """
     renderer: StreamRenderer | None = None
+    last_usage: Usage | None = None
     try:
         for ev in events:
             if isinstance(ev, StreamStart):
-                renderer = StreamRenderer(live=live)
+                renderer = StreamRenderer()
                 renderer.__enter__()
             elif isinstance(ev, ReasoningDelta):
                 if renderer:
@@ -347,9 +334,11 @@ def consume(events, *, live: bool = True) -> None:
             elif isinstance(ev, Warn):
                 warn(ev.message)
             elif isinstance(ev, Usage):
-                token_line(ev.prompt, ev.completion, ev.cached, ev.total)
+                last_usage = ev
             elif isinstance(ev, TurnEnd):
-                pass  # 终端无需动作；Web/日志消费者用它复位状态
+                if last_usage is not None:
+                    token_line(last_usage.prompt, last_usage.completion, last_usage.cached, last_usage.total)
+                    last_usage = None
     finally:
         if renderer is not None:
             renderer.__exit__(None, None, None)
