@@ -491,7 +491,12 @@ class MiniAgentApp(App):
                     prompt = self.query_one("#prompt", Input)
                     prompt.value = selected
                     self.dock.hide_completion()
-                    self.submit_text(selected)
+                    if selected == "/model":
+                        # 从命令补全里选中 /model 时：打开档案补全供上下选择，
+                        # 而不是直接执行静态列表
+                        self.dock._update_completion(selected)
+                    else:
+                        self.submit_text(selected)
                 return
 
         question = sanitize(raw)
