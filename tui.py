@@ -247,12 +247,13 @@ class Dock(Vertical):
         if value == "/model":
             self._model_mode = True
             profiles = list_profiles()
+            current = self.app.session.profile_name
             max_name_len = max(len(p) for p in profiles)
             max_model_len = max(len(get_profile(p)["model"]) for p in profiles)
             options = []
             for pname in profiles:
                 profile = get_profile(pname)
-                is_current = pname == self.session.profile_name
+                is_current = pname == current
                 marker = Text("●", style="green" if is_current else "dim")
                 name_text = Text(f"{pname:<{max_name_len}}", style="bold" if is_current else "")
                 model_text = Text(f"{profile['model']:<{max_model_len}}", style="dim")
