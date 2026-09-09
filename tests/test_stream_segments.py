@@ -1,4 +1,4 @@
-"""stream_segments 分段器单测：ui/tui 两前端共用的流式切割契约。
+"""stream_segments 分段器单测：流式切割契约（ui.py StreamRenderer 与落卷渲染共用）。
 
 契约：完成段（fence 闭合 + 空行分界）一旦吐出即冻结落卷；
 未闭合 ``` 或没有空行时一切留在生长中的尾段。
