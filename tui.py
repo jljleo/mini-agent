@@ -217,6 +217,7 @@ class Dock(Vertical):
         super().__init__(id="dock")
         self._queued: list[str] = []
         self._model_mode = False
+        self._model_explicitly_selected = False
 
     def compose(self) -> ComposeResult:
         yield Static("", id="approval")
@@ -246,6 +247,7 @@ class Dock(Vertical):
         # /model 无参数时：列出档案供选择
         if value == "/model":
             self._model_mode = True
+            self._model_explicitly_selected = False
             profiles = list_profiles()
             current = self.app.session.profile_name
             max_name_len = max(len(p) for p in profiles)
@@ -288,11 +290,15 @@ class Dock(Vertical):
         completion = self.query_one("#completion", OptionList)
         if completion.display:
             completion.action_cursor_up()
+            if self._model_mode:
+                self._model_explicitly_selected = True
 
     def action_completion_down(self) -> None:
         completion = self.query_one("#completion", OptionList)
         if completion.display:
             completion.action_cursor_down()
+            if self._model_mode:
+                self._model_explicitly_selected = True
 
     def selected_completion_id(self) -> str | None:
         """返回当前高亮的补全项 id（命令名/档案名）；无高亮返回 None。"""
@@ -303,6 +309,10 @@ class Dock(Vertical):
     def is_model_selection(self) -> bool:
         """当前补全列表是否处于 /model 档案选择模式。"""
         return self._model_mode
+
+    def model_explicitly_selected(self) -> bool:
+        """用户在 /model 列表里用上下键移动过（或点击过），表示确实想选档案。"""
+        return self._model_explicitly_selected
 
     def has_completion(self) -> bool:
         return self.query_one("#completion", OptionList).display
@@ -469,7 +479,14 @@ class MiniAgentApp(App):
             selected = self.dock.selected_completion_id()
             if selected is not None:
                 if self.dock.is_model_selection():
-                    self._switch_profile(selected)
+                    if self.dock.model_explicitly_selected():
+                        self._switch_profile(selected)
+                    else:
+                        # 只是输入了 /model 就按回车：展示静态列表，不直接切到第一个档案
+                        self.dock.hide_completion()
+                        prompt = self.query_one("#prompt", Input)
+                        prompt.value = ""
+                        self._run_slash_command("/model", "")
                 else:
                     prompt = self.query_one("#prompt", Input)
                     prompt.value = selected
