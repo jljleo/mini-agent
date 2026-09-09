@@ -17,7 +17,7 @@ HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历
 SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/resume 恢复用）
 
 # --- 模型（多模型档案）---
-# 所有兼容 OpenAI Chat Completions 协议的提供商都在 JSON 文件里配置：
+# 所有 Kimi 模型档案都在 JSON 文件里配置：
 #   - models.default.json：仓库内置默认档案（可提交）
 #   - models.json：用户本地覆盖/新增档案（gitignored）
 # 格式：顶层对象，键为档案名，值为 {"model", "base_url", "api_key_env", "context_tokens"}。
@@ -81,7 +81,7 @@ def get_profile(name: str) -> dict:
         "name": name,
         "model": raw["model"],
         "base_url": raw["base_url"],
-        "api_key_env": raw.get("api_key_env", "OPENAI_API_KEY"),
+        "api_key_env": raw.get("api_key_env", "MOONSHOT_API_KEY"),
         "context_tokens": context_tokens,
         "truncate_high_tokens": high,
         "truncate_low_tokens": int(high * 0.6),
@@ -119,7 +119,7 @@ except KeyError as exc:
     available = ", ".join(list_profiles())
     raise SystemExit(
         f"未知模型档案 {MODEL_PROFILE!r}（MINI_AGENT_MODEL），"
-        f"可选：{available}；新提供商请在 models.default.json 或 models.json 添加"
+        f"可选：{available}；新模型请在 models.default.json 或 models.json 添加"
     ) from exc
 
 
@@ -213,18 +213,16 @@ SYSTEM_MESSAGES = [
     {
         "role": "system",
         "content": (
-            "你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。"
-            "你会为用户提供安全，有帮助，准确的回答。同时，你会拒绝一切涉及恐怖主义，"
-            "种族歧视，黄色暴力等问题的回答。Moonshot AI 为专有名词，不可翻译成其他语言。"
+            "你是 Kimi，由 Moonshot AI 提供的人工智能助手，专注于软件工程与编程任务。"
+            "你会优先使用已声明的工具（read_file、write_file、edit_file、run_bash、search_tools 等）"
+            "来完成任务；需要联网获取实时信息时，使用 run_bash 执行 curl（执行前向用户说明要访问的地址）。"
+            "现有工具不够用时，再用 search_tools 查找额外工具。"
+            "你会为用户提供安全、有帮助、准确的回答，并拒绝涉及恐怖主义、种族歧视、黄色暴力等问题的请求。"
         ),
     },
     {
         "role": "system",
         "content": "文件读写、run_bash 等基础工具已直接声明可用；todo 清单、search_history 历史检索等工具用 search_tools 检索后即可调用。",
-    },
-    {
-        "role": "system",
-        "content": "你是 Kimi，由 Moonshot AI 提供的人工智能助手，专注于软件工程与编程任务。你会优先使用已声明的工具（读文件、写文件、编辑文件、run_bash、search_tools 等）来完成任务；需要联网获取实时信息时，使用 run_bash 执行 curl（执行前向用户说明要访问的地址）。现有工具不够用时，再用 search_tools 查找额外工具。",
     },
     {
         "role": "system",
