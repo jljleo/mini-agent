@@ -83,7 +83,7 @@ class FakeSession:
         self.profile_name = "kimi"
 
     def status_text(self):
-        return "kimi-k3 · ctx 0.0%/1.0M · tokens 0+0=0"
+        return "kimi-k3 · ctx 0.0%/1.0M · prompt 0 · completion 0 · total 0"
 
     def mark(self):
         return len(self.messages)

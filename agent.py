@@ -165,7 +165,7 @@ class ChatSession:
         return (
             f"{self.profile['model']} · ctx {pct:.1f}%/"
             f"{format_context_tokens(self.profile['context_tokens'])} · "
-            f"tokens {format_tokens(prompt)}+{format_tokens(completion)}={format_tokens(total)}"
+            f"prompt {format_tokens(prompt)} · completion {format_tokens(completion)} · total {format_tokens(total)}"
         )
 
     # ---- 历史管理 ----

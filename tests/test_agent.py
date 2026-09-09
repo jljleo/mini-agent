@@ -383,7 +383,7 @@ class TestStatusText:
         session.total_prompt_tokens = 99_999
         session.total_completion_tokens = 1
         assert "ctx 10.0%/64K" in session.status_text()
-        assert "tokens 99K+1=100K" in session.status_text()
+        assert "prompt 99K · completion 1 · total 100K" in session.status_text()
 
     def test_first_turn_falls_back_to_estimate(self, session, small_context_profile, monkeypatch):
         session.set_profile(small_context_profile)
