@@ -72,13 +72,12 @@ class TestModel:
         cmd_model(session, "")
         out = capsys.readouterr().out
         assert "kimi" in out
-        assert "deepseek" in out
+        assert "kimi-code" in out
 
-    def test_switches_profile(self, session, monkeypatch, capsys):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
-        cmd_model(session, "deepseek")
-        assert session.profile_name == "deepseek"
-        assert session.profile["model"] == "deepseek-chat"
+    def test_switches_profile(self, session, capsys):
+        cmd_model(session, "kimi-k2.7-code")
+        assert session.profile_name == "kimi-k2.7-code"
+        assert session.profile["model"] == "kimi-k2.7-code"
         assert "已切换" in capsys.readouterr().out
 
     def test_unknown_profile_warns(self, session, capsys):
@@ -86,9 +85,9 @@ class TestModel:
         assert "未知模型档案" in capsys.readouterr().out
 
     def test_missing_key_keeps_original_profile(self, session, monkeypatch, capsys):
-        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
         original = session.profile_name
-        cmd_model(session, "deepseek")
+        cmd_model(session, "kimi-k2.7-code")
         assert "缺少 API key" in capsys.readouterr().out
         assert session.profile_name == original
 
@@ -98,12 +97,11 @@ class TestCompact:
         cmd_compact(session)
         assert "无需压缩" in capsys.readouterr().out
 
-    def test_compacts_with_summary_and_archives(self, session, monkeypatch, capsys):
+    def test_compacts_with_summary_and_archives(self, session, small_context_profile, monkeypatch, capsys):
         """手动压缩：中段换成摘要、原文归档、落盘。"""
-        # 默认 kimi-k3 是 1M 窗口，切到 deepseek 64K 让测试数据能超过 LOW 水位
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
-        session.set_profile("deepseek")
-        # 造一个超过 deepseek LOW 水位（~21K tokens ≈ 42K 字符）的历史
+        # 默认 kimi-k3 是 1M 窗口，切到 64K 测试档案让数据能超过 LOW 水位
+        session.set_profile(small_context_profile)
+        # 造一个超过 LOW 水位（~21K tokens ≈ 42K 字符）的历史
         session.messages.append({"role": "user", "content": "最初任务"})
         session.messages.append({"role": "assistant", "content": "首次回应"})
         for _i in range(25):
@@ -122,9 +120,8 @@ class TestCompact:
         assert "已压缩" in capsys.readouterr().out
         assert os.path.exists(agent.SESSION_FILE)  # 突变后立即落盘
 
-    def test_summary_failure_falls_back_to_marker(self, session, monkeypatch):
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
-        session.set_profile("deepseek")
+    def test_summary_failure_falls_back_to_marker(self, session, small_context_profile, monkeypatch):
+        session.set_profile(small_context_profile)
         session.messages.append({"role": "user", "content": "最初任务"})
         session.messages.append({"role": "assistant", "content": "首次回应"})
         for _i in range(25):

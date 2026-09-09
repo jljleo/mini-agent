@@ -37,7 +37,7 @@ def reload_config(monkeypatch, tmp_path):
             available = ", ".join(config.list_profiles())
             raise SystemExit(
                 f"未知模型档案 {name!r}（MINI_AGENT_MODEL），"
-                f"可选：{available}；新提供商请在 config.MODEL_PROFILES 或 models.json 添加"
+                f"可选：{available}；新模型请在 models.default.json 或 models.json 添加"
             ) from exc
 
     yield _reload
@@ -54,11 +54,11 @@ def test_default_profile_is_kimi(reload_config):
 
 
 def test_profile_switch(reload_config):
-    reload_config("deepseek")
-    assert config.MODEL == "deepseek-chat"
-    assert config.BASE_URL == "https://api.deepseek.com/v1"
-    assert config.API_KEY_ENV == "DEEPSEEK_API_KEY"
-    assert config.CONTEXT_TOKENS == 64_000
+    reload_config("kimi-code-256k")
+    assert config.MODEL == "k3-256k"
+    assert config.BASE_URL == "https://api.kimi.com/coding/v1"
+    assert config.API_KEY_ENV == "KIMI_CODE_API_KEY"
+    assert config.CONTEXT_TOKENS == 256_000
 
 
 def test_truncation_watermarks_follow_context_window(reload_config):
@@ -77,7 +77,7 @@ def test_truncation_watermarks_follow_context_window(reload_config):
     })
     assert (config.TRUNCATE_HIGH_TOKENS, config.TRUNCATE_LOW_TOKENS) == (100_000, 60_000)
     # 小窗口模型水位必须同比下移，否则 compact 的防爆兜底失效
-    reload_config("deepseek")
+    reload_config("kimi-code-256k")
     assert config.TRUNCATE_HIGH_TOKENS == config.CONTEXT_TOKENS - 28_000
     assert 0 < config.TRUNCATE_LOW_TOKENS < config.TRUNCATE_HIGH_TOKENS
 
@@ -112,9 +112,9 @@ def test_user_profiles_override_builtin(reload_config):
 
 
 def test_get_profile_returns_normalized_dict(reload_config):
-    reload_config("qwen")
-    p = config.get_profile("qwen")
-    assert p["model"] == "qwen-plus"
+    reload_config("kimi-code-256k")
+    p = config.get_profile("kimi-code-256k")
+    assert p["model"] == "k3-256k"
     assert p["truncate_high_tokens"] == p["context_tokens"] - 28_000
     assert p["truncate_low_tokens"] == int(p["truncate_high_tokens"] * 0.6)
 

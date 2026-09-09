@@ -51,3 +51,19 @@ def session(monkeypatch, tmp_path):
     import agent
     monkeypatch.setattr(agent, "SESSION_FILE", str(tmp_path / "session.json"))
     return agent.ChatSession()
+
+
+@pytest.fixture
+def small_context_profile(monkeypatch):
+    """注册一个 64K 窗口的测试用 Kimi 档案，用于触发截断/百分比等边界测试。"""
+    import config
+    profile = {
+        "model": "kimi-test-64k",
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "context_tokens": 64_000,
+    }
+    config.MODEL_PROFILES["kimi-test-64k"] = profile
+    config.USER_PROFILES.pop("kimi-test-64k", None)
+    yield "kimi-test-64k"
+    config.MODEL_PROFILES.pop("kimi-test-64k", None)

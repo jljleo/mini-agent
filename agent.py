@@ -74,9 +74,6 @@ def _agents_md_text() -> str | None:
 # 常驻请求的工具声明：search_tools（发现入口）+ 核心四件套（RESIDENT_TOOL_NAMES）。
 # 模块级算一次即可——本行执行时 tools.py 已完成导入注册（上方 from tools import），
 # 常驻档是静态集合，无需每轮重算。可发现工具（名单外）由 search_tools 检索后注入。
-# NOTE: $web_search 暂不接入——Moonshot 平台 bug：kimi-k3 上回传 builtin_function
-# 工具结果必现 400 tokenization failed（官方论坛 2026-07-23 已报，未修）。
-# 平台修复后把名字加进 RESIDENT_TOOL_NAMES 即可。
 BASE_TOOLS = get_resident_tool_schemas()
 
 def load_saved_session() -> dict | None:
@@ -222,14 +219,10 @@ class ChatSession:
         name = tool_call["function"].get("name")
         raw_arguments = tool_call["function"].get("arguments") or "{}"
         try:
-            if name == "$web_search":
-                # Kimi 内置工具：服务端执行搜索，客户端只需把参数原样回传
-                result = raw_arguments
-            else:
-                if name not in TOOLS:
-                    raise KeyError(f"Unknown tool: {name}")
-                arguments = json.loads(raw_arguments)
-                result = str(TOOLS[name](**arguments))  # 兜底：工具可能返回非字符串
+            if name not in TOOLS:
+                raise KeyError(f"Unknown tool: {name}")
+            arguments = json.loads(raw_arguments)
+            result = str(TOOLS[name](**arguments))  # 兜底：工具可能返回非字符串
         except Exception as e:
             result = f"调用失败: {type(e).__name__}: {e}"
         return name, result

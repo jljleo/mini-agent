@@ -46,17 +46,5 @@
         "base_url": "https://api.kimi.com/coding/v1",
         "api_key_env": "KIMI_CODE_API_KEY",
         "context_tokens": 256000
-    },
-    "deepseek": {
-        "model": "deepseek-chat",
-        "base_url": "https://api.deepseek.com/v1",
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "context_tokens": 64000
-    },
-    "qwen": {
-        "model": "qwen-plus",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key_env": "DASHSCOPE_API_KEY",
-        "context_tokens": 131072
     }
 }
