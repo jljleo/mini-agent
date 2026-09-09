@@ -1,16 +1,14 @@
-"""input_utils 回归测试：read_input 管道分支 + ApprovalChannel 确认通道。
+"""input_utils 回归测试：read_input 管道分支。
 
-常驻输入框的按键绑定/工具栏靠 pty 冒烟覆盖，这里测通道逻辑本身。
+prompt_toolkit 交互路径靠手工验证（需要 pty），这里测管道契约。
 """
 
 import io
 import sys
-import threading
-import time
 
 import pytest
 
-from input_utils import ApprovalChannel, read_input
+from input_utils import read_input
 
 
 class FakeStdin:
@@ -55,53 +53,3 @@ class TestReadInputPipe:
         feed(monkeypatch, b"  /quit  \n")
         text, forced = read_input()
         assert text == "/quit" and forced is True
-
-
-class TestApprovalChannel:
-    def test_yes_answer_approves(self):
-        """ask 挂起，另一个线程 answer(True) 后放行。"""
-        channel = ApprovalChannel()
-        result = {}
-
-        def asker():
-            result["ok"] = channel.ask("ls -la", dangerous=False, timeout=5)
-
-        t = threading.Thread(target=asker)
-        t.start()
-        # 等 ask 进入 pending 状态再应答（模拟用户在输入框按 y）
-        for _ in range(100):
-            if channel.has_pending:
-                break
-            time.sleep(0.01)
-        assert channel.has_pending
-        channel.answer(True)
-        t.join(timeout=2)
-        assert result["ok"] is True
-
-    def test_no_answer_rejects(self):
-        channel = ApprovalChannel()
-        result = {}
-
-        def asker():
-            result["ok"] = channel.ask("rm -rf x", dangerous=True, timeout=5)
-
-        t = threading.Thread(target=asker)
-        t.start()
-        for _ in range(100):
-            if channel.has_pending:
-                break
-            time.sleep(0.01)
-        channel.answer(False)
-        t.join(timeout=2)
-        assert result["ok"] is False
-
-    def test_timeout_defaults_to_reject(self):
-        """无人应答超时：默认拒绝（假 tty 防线）。"""
-        channel = ApprovalChannel()
-        assert channel.ask("ls", dangerous=False, timeout=0.1) is False
-        assert not channel.has_pending  # 超时后 pending 已清理
-
-    def test_answer_without_pending_is_noop(self):
-        channel = ApprovalChannel()
-        channel.answer(True)  # 不应抛异常
-        assert not channel.has_pending

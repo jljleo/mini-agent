@@ -1,25 +1,18 @@
-"""CLI 入口：主循环与运行调度，业务逻辑下沉到 agent / input_utils / ui / bridge。
+"""CLI 入口：单一主循环，业务逻辑下沉到 agent / input_utils / ui / bridge。
 
 运行：python main.py
-退出：exit / quit / :q / /quit / Ctrl+C / Ctrl+D（运行中 Ctrl+C / Esc = 打断本轮，不退出）
+退出：exit / quit / :q / /quit / Ctrl+C / Ctrl+D（运行中单击 Ctrl+C = 优雅打断本轮）
 
-两种形态：
-- tty（_repl_loop）：常驻输入框（prompt_toolkit + patch_stdout）——agent 运行时
-  输入框不消失：输入回车 = 追加消息（steering 队列，轮边界注入）；
-  Esc / Ctrl+C = 立即打断（control.abort() 断流，不等下一个 chunk）；
-  确认请求由输入框 y/n 按键应答（ApprovalChannel）
-- 管道（_pipe_loop）：回合制读取 + 线程桥（bridge.py），无运行中交互
+tty 与管道共用 `_chat_loop`，差别全部下沉到 read_input / ui 内部自适应：
+- 输入：tty = prompt_toolkit（历史/补全/幽灵建议/底部状态栏），管道 = 行读取
+- 渲染：tty = Live 增量重排 Markdown，管道 = 纯文本直出（StreamRenderer 自适应）
 
-前端边界是刻意的架构决策（见 ROADMAP 定位）：不做全屏 TUI——
-输入编辑/历史/补全/滚动交给 prompt_toolkit 与终端模拟器这两个成熟项目，
-本仓库只维护内核与这 ~100 行胶水。
+前端边界是刻意的架构决策（见 ROADMAP 定位）：回合制——agent 运行时终端归渲染器，
+本轮结束回到提示符。刻意不做"运行中输入框"（patch_stdout 与 Live 光标重绘互斥，
+两者共存必闪烁）；运行中打断走 Ctrl+C（bridge 优雅收尾）。
 """
 
-import queue
 import sys
-import threading
-
-from prompt_toolkit.patch_stdout import patch_stdout
 
 import commands  # noqa: F401  集中式注册：导入即触发 @command 注册
 import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
@@ -28,19 +21,7 @@ from agent import ChatSession
 from bridge import run_in_thread
 from command_registry import COMMANDS
 from config import CONTEXT_TOKENS, MODEL, PROJECT_ROOT, QUIT_COMMANDS
-from events import TurnControl
-from input_utils import (
-    ApprovalChannel,
-    abort_pending_approval,
-    begin_run,
-    current_control,
-    end_run,
-    is_running,
-    read_input,
-    set_approval_channel,
-    set_status_provider,
-    take_prefill,
-)
+from input_utils import read_input, set_status_provider
 
 
 def _dispatch_command(session: ChatSession, question: str, forced: bool):
@@ -61,89 +42,22 @@ def _dispatch_command(session: ChatSession, question: str, forced: bool):
     return False
 
 
-# ---- tty：常驻输入框 ----
+def _chat_loop(session: ChatSession) -> None:
+    """唯一主循环：读输入 → 分发命令 → 前台渲染本轮。
 
-
-def _run_turn(session: ChatSession, question: str, control: TurnControl) -> None:
-    """运行线程：驱动内核事件流并渲染；成功存档、失败回滚、steering 余量回填。"""
-    mark = session.mark()
-    try:
-        # live=False：patch_stdout 下禁用 Live 光标重绘，正文按块落卷
-        ui.consume(session.chat(question, control=control), live=False)
-        session.save()  # 每轮成功（含优雅中断收尾）后自动存档
-    except Exception as e:
-        session.rollback(mark)
-        ui.error(f"{type(e).__name__}: {e}")
-    finally:
-        # 本轮没等到注入时机的 steering（如模型一轮就出终稿）：存为下轮回填，
-        # 不吞用户输入（与未知命令报错回填同一约定）
-        leftover = []
-        while True:
-            try:
-                leftover.append(control.steer.get_nowait())
-            except queue.Empty:
-                break
-        end_run(leftover)
-
-
-def _repl_loop(session: ChatSession) -> None:
-    set_approval_channel(ApprovalChannel())
+    Ctrl+C 语义（bridge 保证）：空闲 = 退出；运行中单击 = 置 interrupt 旗帜，
+    内核优雅收尾（补孤儿 tool 结果）照常存档；双击 = 内核卡死时的逃生口，
+    放弃本轮不存档（防写入半截状态），tty 回提示符、管道退出进程。
+    """
+    interactive = sys.stdin.isatty()
     prefill = ""
-    # patch_stdout：运行线程的输出被抬升到常驻输入框上方
-    with patch_stdout(raw=True):
-        while True:
-            prefill = prefill or take_prefill()
-            try:
-                question, forced = read_input(prefill=prefill)
-            except KeyboardInterrupt:
-                # Ctrl+C：运行中 = 立即打断本轮（断流 + 联动拒绝待确认）；空闲 = 退出
-                control = current_control()
-                if control is not None:
-                    control.abort()
-                    abort_pending_approval()
-                    continue
-                ui.goodbye()
-                break
-            except EOFError:  # Ctrl+D
-                ui.goodbye()
-                break
-            prefill = ""
-
-            if not question:
-                continue
-            if is_running():
-                # 运行中：一切输入都按追加消息处理（此时执行命令太危险——
-                # /clear 之类会拆运行中的会话）
-                current_control().steer.put(question)
-                ui.note(f"❯ {question}（已排队，将在当前步骤完成后注入）", tag="steer")
-                continue
-
-            verdict = _dispatch_command(session, question, forced)
-            if verdict == "quit":
-                break
-            if verdict is True:
-                continue
-            if verdict == "prefill":
-                prefill = question  # 报错但不清空：回填原文，用户修正后重发
-                continue
-
-            control = TurnControl()
-            begin_run(control)  # 先登记运行态再启动线程，防时序窗口
-            threading.Thread(
-                target=_run_turn, args=(session, question, control), daemon=True,
-            ).start()
-
-
-# ---- 管道：回合制 + 线程桥 ----
-
-
-def _pipe_loop(session: ChatSession) -> None:
     while True:
         try:
-            question, forced = read_input()
+            question, forced = read_input(prefill=prefill)
         except (EOFError, KeyboardInterrupt):
             ui.goodbye()
             break
+        prefill = ""
 
         if not question:
             continue
@@ -153,17 +67,19 @@ def _pipe_loop(session: ChatSession) -> None:
         if verdict is True:
             continue
         if verdict == "prefill":
-            continue  # 管道无输入框，无法回填
+            prefill = question  # 报错但不清空：回填原文，用户修正后重发（管道无输入框，静默忽略）
+            continue
 
         mark = session.mark()  # 记录历史位置，失败时整体回滚本轮产生的所有消息
-        # 线程桥：内核在 worker 线程跑，主线程消费事件。单击 Ctrl+C = 优雅中断
-        # （bridge 自动置 interrupt）；双击 = 放弃本轮并退出进程（内核可能卡死，
-        # 进程死亡是唯一干净的边界，不存档防写入半截状态，/resume 可恢复上次存档）
         events, _control = run_in_thread(lambda c, q=question: session.chat(q, control=c))
         try:
-            ui.consume(events)
-            session.save()
+            ui.consume(events, live=True)  # 非 tty 时 StreamRenderer 自动降级纯文本
+            session.save()  # 每轮成功（含优雅中断收尾）后自动存档
         except KeyboardInterrupt:
+            session.rollback(mark)
+            if interactive:
+                ui.warn("已强制打断本轮（未存档）")
+                continue
             ui.warn("已强制中断并退出（本轮未存档）")
             ui.goodbye()
             break
@@ -174,13 +90,9 @@ def _pipe_loop(session: ChatSession) -> None:
 
 def main() -> None:
     session = ChatSession()
-    set_status_provider(session.status_text)  # 输入区底部状态栏：模型 · 上下文窗口 · token 累计
+    set_status_provider(session.status_text)  # tty 输入区底部状态栏：模型 · 上下文窗口 · token 累计
     ui.banner(MODEL, PROJECT_ROOT, CONTEXT_TOKENS)
-
-    if sys.stdin.isatty():
-        _repl_loop(session)
-    else:
-        _pipe_loop(session)
+    _chat_loop(session)
 
 
 if __name__ == "__main__":

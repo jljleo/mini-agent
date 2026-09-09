@@ -9,7 +9,7 @@
 
 - 扁平的 Python 3.13 CLI agent；有最小 `requirements.txt`（openai / python-dotenv / prompt_toolkit / rich），没有构建步骤、lint 配置或代码生成。使用仓库内虚拟环境：`.venv/bin/python`；新环境先 `.venv/bin/pip install -r requirements.txt`。
 - 代码库感知（repo_map.py）全语言统一走 tree-sitter 解析（lazy import，语言包缺失时该语言静默为空）：python / javascript / typescript(含 tsx) / go / rust / java。加新语言 = 在 repo_map.py 注册 `@_extractor(".xxx")` 提取器 + 装对应 tree-sitter-xxx 包，索引/排序/缓存/检索逻辑语言无关无需改动。
-- 入口是 `main.py`；根据 `sys.stdin.isatty()` 自动选择 TTY 模式（`_repl_loop`：prompt_toolkit 常驻输入框 + patch_stdout）或管道模式（`_pipe_loop`）。曾有的 Textual 全屏 TUI 已于 2026-09 移除（R0：自研全屏 UI 是负资产，输入/滚动交给 prompt_toolkit 与终端模拟器），不要再引入全屏前端。
+- 入口是 `main.py`；tty 与管道共用单一主循环 `_chat_loop`（回合制前台渲染），差别下沉到 `read_input`/`ui` 内部自适应。曾有的 Textual 全屏 TUI 与 patch_stdout 常驻输入框均已于 2026-09 移除（R0：自研全屏 UI 是负资产；patch_stdout 与 Live 光标重绘互斥必闪烁），不要再引入全屏前端或运行中输入框。
 - 运行时配置在 `config.py`，会加载 `.env`；真实运行需要 `MOONSHOT_API_KEY`。不要读取或提交 `.env`。
 - 内核/UI 边界很重要：`agent.py`、`streaming.py`、`compact.py` 必须保持为事件生产者，不能 `import ui`。通过产出/消费 `events.py` 事件来渲染或上报（`ui.consume`、bench 消费者）。
 
@@ -42,6 +42,6 @@
 - 文件工具是窄接口，围栏限制在 `PROJECT_ROOT`；项目外路径需要确认。`run_bash` 由 `permissions.json` 裁决：`deny > allow > ask`；如果命令包含项目外路径，即使命中 allow 也会降级为 ask。不要用 bash 绕过文件围栏访问项目外路径。
 - `edit_file` 是容错策略链（AGENT_DESIGN 13 条）：L1 精确匹配（count>1 拒绝防误改）→ L2 行级宽容定位（忽略行尾空白/换行差异，仍强制唯一）→ L3 失败时报错带 read_file 指引 + 文件头部预览。改后自动做语法冒烟（tree-sitter），坏代码以带行号的 ⚠ 报错附在工具结果里回喂。两个工程纪律：读写必须 `newline=""` 保真（否则 CRLF 仓库换行风格被毁）；`_resolve_safe_path` 必须对 `PROJECT_ROOT` realpath 化（macOS /var→/private/var 符号链接会误判越界）。
 - `$web_search` 在 `config.py` 中被刻意禁用，因为 kimi-k3 当前处理内置工具结果会失败；需要联网时用 `run_bash` + `curl`，并先告诉用户要访问的 URL。
-- UI 输出统一走语义化 helper；TTY 与管道都用 `ui.py`（StreamRenderer：tty 下 Live 增量重排，常驻输入框模式 live=False 按块落卷，管道纯文本直出）。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
+- UI 输出统一走语义化 helper；tty 与管道都用 `ui.py`（StreamRenderer：tty 下 Live 增量重排，管道自动降级纯文本直出）。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
 - `.session.json`、`.chat_history`、`session_todos.json`、`bench/results/` 都是运行时产物，已 gitignore。
 - **评测必留档**：任何真实 API 评测（`bench/run_bench.py` 真跑）完成后必须追加一节到 `bench/EXPERIMENTS.md`（文件头部的强制规范与模板）并随代码提交——负结果也要记；评测抓到内核缺陷（已发生三次：动态注入时序 400、符号链接根误判、@tool 装饰器挂错）是本体系最高价值产出，不许丢在对话里。
