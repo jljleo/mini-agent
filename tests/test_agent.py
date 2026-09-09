@@ -89,6 +89,23 @@ def canned(messages, usage=None):
     return lambda completion: iter([StreamFinished(messages, usage)])
 
 
+class TestEventContract:
+    def test_stream_finished_forwarded_to_consumers(self, session, monkeypatch):
+        """StreamFinished 内核取用定稿后必须照常透传：它是事件契约的一部分，
+        渲染器的收尾（Live 停止/补换行）依赖它按轮到达。
+        回归：2026-09 内核曾拦截不透传，tty 渲染器跨轮泄漏、管道正文与 token 行粘连。"""
+        stub_chat_network(session, monkeypatch)
+        monkeypatch.setattr(
+            agent, "stream_and_assemble",
+            canned([{"role": "assistant", "content": "终稿"}]))
+
+        events = list(session.chat("你好"))
+
+        assert any(isinstance(e, StreamFinished) for e in events), \
+            "StreamFinished 必须透传给消费者（事件契约）"
+        assert isinstance(events[-1], TurnEnd)
+
+
 class TestDeadLoopFuse:
     def test_same_call_three_times_intercepted(self, session, monkeypatch):
         """行为保险丝：同一 (工具名, 参数) 连续 3 次判死循环，强制结束并补拦截结果。"""

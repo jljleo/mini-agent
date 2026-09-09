@@ -324,8 +324,9 @@ class ChatSession:
                 source = interruptible_stream(open_stream, control)
             else:
                 source = open_stream()
-            # 流式事件原样透传给消费者；StreamFinished 是内核自留的收尾事件
-            # （定稿消息与 usage 从它身上取回，继续驱动工具循环）
+            # 流式事件原样透传给消费者；StreamFinished 内核取用定稿/usage 后也要透传——
+            # 它是事件契约的一部分（events.py），渲染器的收尾（Live 停止/段落定稿/
+            # 补换行）依赖它按轮到达；吞掉会导致渲染器跨轮泄漏、收尾全部堆到 TurnEnd
             assistant_messages, usage = [], None
             try:
                 for ev in stream_and_assemble(source):
@@ -337,8 +338,7 @@ class ChatSession:
                         return
                     if isinstance(ev, StreamFinished):
                         assistant_messages, usage = ev.messages, ev.usage
-                    else:
-                        yield ev
+                    yield ev
             except Exception:
                 # StreamAborted / abort 断流导致的读取异常——预期内的中断路径
                 if self._interrupted(control):

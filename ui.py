@@ -207,6 +207,7 @@ class StreamRenderer:
         self._last_render = 0.0
         self._reasoning_chars = 0
         self._reasoning_noted = False
+        self._plain_printed = False  # 管道直出过正文：收尾需补换行，防后续输出粘连
 
     def __enter__(self) -> StreamRenderer:
         if not self._plain:
@@ -258,6 +259,7 @@ class StreamRenderer:
         """正文：tty Live 增量重排尾段；管道纯文本直出。"""
         if self._plain:
             print(text, end="", flush=True)
+            self._plain_printed = True
             return
         if self._live is None:
             # 首个正文 delta：收 spinner、落思考折叠行、起 Live
@@ -287,6 +289,8 @@ class StreamRenderer:
             self._live.stop()
             self._live = None
             console.print()
+        elif self._plain and self._plain_printed:
+            print()  # 直出正文后补换行：后续 token 行/提示符不粘在正文末尾
         else:
             self._note_reasoning()  # 整轮无正文（纯工具调用）：折叠行在此落地
         return False

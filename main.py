@@ -73,7 +73,7 @@ def _chat_loop(session: ChatSession) -> None:
         mark = session.mark()  # 记录历史位置，失败时整体回滚本轮产生的所有消息
         events, _control = run_in_thread(lambda c, q=question: session.chat(q, control=c))
         try:
-            ui.consume(events, live=True)  # 非 tty 时 StreamRenderer 自动降级纯文本
+            ui.consume(events)  # 非 tty 时 StreamRenderer 自动降级纯文本
             session.save()  # 每轮成功（含优雅中断收尾）后自动存档
         except KeyboardInterrupt:
             session.rollback(mark)
