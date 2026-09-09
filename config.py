@@ -3,16 +3,26 @@
 所有可调参数收在这里，改行为不用翻业务代码。
 """
 
+import json
 import os
+import sys
 
 from dotenv import load_dotenv
 
 load_dotenv()  # 把 .env 加载进环境变量，API key 不落代码
 
+# --- 项目路径 ---
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历史（跨会话）
+SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/resume 恢复用）
+
 # --- 模型（多模型档案）---
 # 任何兼容 OpenAI Chat Completions 协议的提供商都能接入：在下面加一行档案即可。
 # 用环境变量 MINI_AGENT_MODEL 选择档案（默认 kimi）。context_tokens 按官方文档填——
 # 它是 L1 截断水位的依据（见下文 TRUNCATE_HIGH_TOKENS）：填小了只是更保守，填大了会爆窗。
+#
+# 用户也可以在项目根 models.json 中覆盖内置档案或新增档案，格式示例：
+#   {"deepseek": {"model": "deepseek-chat", "base_url": "...", "api_key_env": "...", "context_tokens": 64000}}
 MODEL_PROFILES = {
     "kimi": {
         "model": "kimi-k3",
@@ -33,21 +43,99 @@ MODEL_PROFILES = {
         "context_tokens": 131_072,
     },
 }
+
+_USER_MODELS_JSON = os.path.join(PROJECT_ROOT, "models.json")
+
+
+def _load_user_profiles(path: str = _USER_MODELS_JSON) -> dict:
+    """加载项目根 models.json 中的用户自定义模型档案；失败时返回空字典并警告。"""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"警告：models.json 加载失败: {exc}", file=sys.stderr)
+        return {}
+    if not isinstance(data, dict):
+        print("警告：models.json 顶层必须是对象", file=sys.stderr)
+        return {}
+    return data
+
+
+def refresh_user_profiles(path: str | None = None) -> None:
+    """重新加载用户模型档案；path 缺省使用项目根 models.json。"""
+    global USER_PROFILES
+    USER_PROFILES = _load_user_profiles(path or _USER_MODELS_JSON)
+
+
+def get_profile(name: str) -> dict:
+    """解析并归一化单个模型档案（用户档案覆盖内置档案）。
+
+    返回字典包含：model, base_url, api_key_env, context_tokens,
+    truncate_high_tokens, truncate_low_tokens。
+    """
+    if name in USER_PROFILES:
+        raw = USER_PROFILES[name]
+    elif name in MODEL_PROFILES:
+        raw = MODEL_PROFILES[name]
+    else:
+        raise KeyError(name)
+    if not isinstance(raw, dict):
+        raise KeyError(f"档案 {name!r} 格式错误")
+    for required in ("model", "base_url"):
+        if required not in raw:
+            raise KeyError(f"档案 {name!r} 缺少必填字段 {required!r}")
+    context_tokens = raw.get("context_tokens", 128_000)
+    high = context_tokens - 28_000
+    return {
+        "name": name,
+        "model": raw["model"],
+        "base_url": raw["base_url"],
+        "api_key_env": raw.get("api_key_env", "OPENAI_API_KEY"),
+        "context_tokens": context_tokens,
+        "truncate_high_tokens": high,
+        "truncate_low_tokens": int(high * 0.6),
+    }
+
+
+def list_profiles() -> list[str]:
+    """返回所有可用档案名（内置 + 用户覆盖/新增）。"""
+    return list({**MODEL_PROFILES, **USER_PROFILES})
+
+
+def apply_profile(name: str) -> None:
+    """把全局常量切换到指定档案；失败时抛出 KeyError。"""
+    global MODEL_PROFILE, MODEL, BASE_URL, API_KEY_ENV, CONTEXT_TOKENS
+    global TRUNCATE_HIGH_TOKENS, TRUNCATE_LOW_TOKENS
+    profile = get_profile(name)
+    MODEL_PROFILE = name
+    MODEL = profile["model"]
+    BASE_URL = profile["base_url"]
+    API_KEY_ENV = profile["api_key_env"]
+    CONTEXT_TOKENS = profile["context_tokens"]
+    TRUNCATE_HIGH_TOKENS = profile["truncate_high_tokens"]
+    TRUNCATE_LOW_TOKENS = profile["truncate_low_tokens"]
+
+
+USER_PROFILES: dict = {}
+refresh_user_profiles()
+
 MODEL_PROFILE = os.environ.get("MINI_AGENT_MODEL", "kimi")
-if MODEL_PROFILE not in MODEL_PROFILES:
+try:
+    apply_profile(MODEL_PROFILE)
+except KeyError as exc:
+    available = ", ".join(list_profiles())
     raise SystemExit(
         f"未知模型档案 {MODEL_PROFILE!r}（MINI_AGENT_MODEL），"
-        f"可选：{', '.join(MODEL_PROFILES)}；新提供商请在 config.MODEL_PROFILES 加一行"
-    )
-_profile = MODEL_PROFILES[MODEL_PROFILE]
-MODEL = _profile["model"]
-BASE_URL = _profile["base_url"]
-API_KEY_ENV = _profile["api_key_env"]  # 从环境变量读 key，不入库
-CONTEXT_TOKENS = _profile["context_tokens"]  # 上下文窗口（截断水位依据 + 状态栏显示）
+        f"可选：{available}；新提供商请在 config.MODEL_PROFILES 或 models.json 添加"
+    ) from exc
 
 
-def format_context_tokens(n: int = CONTEXT_TOKENS) -> str:
+def format_context_tokens(n: int | None = None) -> str:
     """上下文窗口的紧凑显示：128K / 1.0M（状态栏与横幅共用，pi 同款比例样式）。"""
+    if n is None:
+        n = CONTEXT_TOKENS
     return f"{n / 1_000_000:.1f}M" if n >= 1_000_000 else f"{n // 1000}K"
 
 # --- agent 循环 ---
@@ -128,11 +216,6 @@ SUMMARIZE_MAX_CHARS = 150_000  # 摘要输入上限：中段超长时只取靠�
 # repo map 注入 system prompt 的字符预算（约 3000 字符 ≈ 1.5K tokens），
 # 超预算截断，头部保留最高重要性文件/符号；明细靠 search_symbols 惰性取。
 REPO_MAP_MAX_CHARS = 3000
-
-# --- 项目路径 ---
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历史（跨会话）
-SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/resume 恢复用）
 
 # --- system 提示词 ---
 SYSTEM_MESSAGES = [

@@ -32,19 +32,14 @@ from compact import (
     summarize_middle,
 )
 from config import (
-    API_KEY_ENV,
-    BASE_URL,
-    CONTEXT_TOKENS,
     MAX_SAME_TOOL_CALLS,
-    MODEL,
     REPO_MAP_MAX_CHARS,
     SESSION_FILE,
     SUBAGENT_HIDDEN_TOOLS,
     SYSTEM_MESSAGES,
     TOOL_RESULT_PREVIEW_LEN,
-    TRUNCATE_HIGH_TOKENS,
-    TRUNCATE_LOW_TOKENS,
     format_context_tokens,
+    get_profile,
 )
 from events import (
     Note,
@@ -104,8 +99,10 @@ class ChatSession:
     """
 
     def __init__(self, tools: list[dict] | None = None, depth: int = 0,
-                 set_provider: bool = True) -> None:
-        self.client = OpenAI(api_key=os.environ.get(API_KEY_ENV), base_url=BASE_URL)
+                 set_provider: bool = True, profile_name: str | None = None) -> None:
+        self.profile_name = profile_name or config.MODEL_PROFILE
+        self.profile = get_profile(self.profile_name)
+        self._init_client()
         # 拷贝一份 system 模板，避免污染 config 里的原始定义
         self.messages: list[dict] = list(SYSTEM_MESSAGES)
         # AGENTS.md 行为契约注入（与 repo map 同构：失败静默，随会话保留）
@@ -134,6 +131,27 @@ class ChatSession:
         self.tools = tools if tools is not None else BASE_TOOLS
         self.depth = depth
 
+    def _init_client(self) -> None:
+        """根据当前档案创建 OpenAI client；key 缺失时立即报错。"""
+        api_key = os.environ.get(self.profile["api_key_env"])
+        if not api_key:
+            raise RuntimeError(
+                f"档案 {self.profile_name!r} 缺少 API key："
+                f"环境变量 {self.profile['api_key_env']} 未设置"
+            )
+        self.client = OpenAI(api_key=api_key, base_url=self.profile["base_url"])
+
+    def set_profile(self, name: str) -> None:
+        """运行时切换模型档案；失败时保留原档案与 client。"""
+        old_profile, old_name = self.profile, self.profile_name
+        try:
+            self.profile = get_profile(name)
+            self.profile_name = name
+            self._init_client()
+        except Exception:
+            self.profile, self.profile_name = old_profile, old_name
+            raise
+
     def status_text(self) -> str:
         """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。
 
@@ -143,8 +161,11 @@ class ChatSession:
         """
         total = self.total_prompt_tokens + self.total_completion_tokens
         used = self.last_prompt_tokens or estimate_total_tokens(self.messages)
-        pct = used / CONTEXT_TOKENS * 100
-        return f"{MODEL} · ctx {pct:.1f}%/{format_context_tokens()} · tokens {total:,}"
+        pct = used / self.profile["context_tokens"] * 100
+        return (
+            f"{self.profile['model']} · ctx {pct:.1f}%/"
+            f"{format_context_tokens(self.profile['context_tokens'])} · tokens {total:,}"
+        )
 
     # ---- 历史管理 ----
 
@@ -233,12 +254,15 @@ class ChatSession:
         slimmed = apply_message_cap(apply_slimming(self.messages, slim_targets))
         cut = 0
         note = None
-        if estimate_total_tokens(slimmed) >= TRUNCATE_HIGH_TOKENS:
-            cut = detect_truncation_point(slimmed, TRUNCATE_LOW_TOKENS)
+        high = self.profile["truncate_high_tokens"]
+        low = self.profile["truncate_low_tokens"]
+        if estimate_total_tokens(slimmed) >= high:
+            cut = detect_truncation_point(slimmed, low)
             if cut:
                 # L2 优先：让模型把中段压缩成交接摘要；失败时 note=None 回退 L1 硬切标记
                 deferred_notes: list[str] = []  # 摘要内部的消息先收着，统一作为事件产出
                 summary = summarize_middle(extract_middle(slimmed, cut), self.client,
+                                           model=self.profile["model"],
                                            on_note=deferred_notes.append)
                 for msg in deferred_notes:
                     yield Note(msg, tag="compact")
@@ -246,7 +270,7 @@ class ChatSession:
                     note = f"[早期对话历史摘要]\n{summary}"
                     yield Note("上下文超限，已生成早期历史摘要（L2）", tag="compact")
                 else:
-                    yield Note(f"上下文超限，已截断早期历史（L1，目标 {TRUNCATE_LOW_TOKENS // 1000}K tokens）",
+                    yield Note(f"上下文超限，已截断早期历史（L1，目标 {low // 1000}K tokens）",
                                tag="compact")
 
         # 死循环保险丝状态：跟踪连续重复的 (工具名, 参数) 签名
@@ -273,8 +297,8 @@ class ChatSession:
                 return apply_message_cap(apply_slimming(msgs, slim_targets))
 
             payload = apply_truncation(project(self.messages), cut, note)
-            if estimate_total_tokens(payload) >= TRUNCATE_HIGH_TOKENS:
-                escalated = detect_truncation_point(project(self.messages), TRUNCATE_LOW_TOKENS)
+            if estimate_total_tokens(payload) >= high:
+                escalated = detect_truncation_point(project(self.messages), low)
                 if escalated > cut:
                     cut, note = escalated, None
                     payload = apply_truncation(project(self.messages), cut, note)
@@ -283,7 +307,7 @@ class ChatSession:
             yield StreamStart()
             def open_stream(payload=payload):  # 显式绑定当轮投影，防闭包捕获漂移
                 return self.client.chat.completions.create(
-                    model=MODEL,
+                    model=self.profile["model"],
                     # 发送时投影，存储不动；cut 下标对瘦身投影同样有效（瘦身不改消息数量）
                     # note 为 None 时是 L1 硬切标记，为摘要文本时是 L2 保值版
                     messages=payload,

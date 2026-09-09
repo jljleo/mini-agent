@@ -773,7 +773,10 @@ def search_symbols(root: str, query: str, kind: str | None = None,
     matches.sort(key=lambda s: (-s.references, s.line, s.name))
     if not matches:
         hint = f"（kind 过滤 {kind}）" if kind else ""
-        return f"未找到名称含 '{query}' 的符号{hint}。可用 read_file 直接读文件，或换关键词重试。"
+        # E4 实测：乱命名库（q1/helper2）name 检索概念性失灵。给可执行的备用维度
+        return (f"未找到名称含 '{query}' 的符号{hint}。若库命名混乱（无意义标识符），"
+                f"可改用 scope=docs 搜业务词（如中文注释/变量名），或 scope=path 按文件路径检索；"
+                f"也可 read_file 直接读文件。")
     shown = matches[:limit]
     lines = [f"{s.file}:{s.line}  {s.label}" for s in shown]
     more = f"\n…还有 {len(matches) - len(shown)} 个匹配" if len(matches) > len(shown) else ""
