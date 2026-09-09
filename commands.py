@@ -49,6 +49,7 @@ def cmd_clear(session: ChatSession, args: str = ""):
     # token 计数器一并归零：/clear 语义是"全新会话"，累计消耗不应跨会话保留
     session.total_prompt_tokens = 0
     session.total_completion_tokens = 0
+    session.current_context_tokens = 0
     clear_todo_file()
     if os.path.exists(SESSION_FILE):
         os.remove(SESSION_FILE)  # 存档一并清除：/clear 后 /resume 不应复活旧会话

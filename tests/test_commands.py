@@ -33,6 +33,7 @@ class TestClear:
 
         assert len(session.messages) == len(commands.SYSTEM_MESSAGES)
         assert session.total_prompt_tokens == 0
+        assert session.current_context_tokens == 0
         assert not os.path.exists(agent.SESSION_FILE)
         assert not os.path.exists(tools.TODO_FILE)
 

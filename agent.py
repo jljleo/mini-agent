@@ -121,11 +121,14 @@ class ChatSession:
         # 历史检索工具的数据源：存储（而非投影）——被瘦身/截断/摘要/截中的原文都可检索
         if set_provider:
             set_history_provider(lambda: self.messages)
-        # token 仪表盘：会话累计消耗 + 最近一次请求的真实 prompt/completion tokens
+        # token 仪表盘：
+        #   - total_*: 会话累计消耗（含已被截断的旧消息，会虚高）
+        #   - current_context_tokens: 最近一次 API 响应后当前历史消息的真实 token 数
+        #     （prompt + completion），用于状态栏 ctx %；无响应时回退到估算
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.last_prompt_tokens = 0
-        self.last_completion_tokens = 0
+        self.current_context_tokens = 0
         # 子 agent 支持：可注入的工具集与嵌套深度
         self.tools = tools if tools is not None else BASE_TOOLS
         self.depth = depth
@@ -155,16 +158,13 @@ class ChatSession:
         """输入区底部状态栏的内容（input_utils 底栏回调，每次按键重绘）。
 
         ctx 占比 = 当前历史消息占用的窗口比例（pi 同款比例样式）。
-        优先用最近一次真实请求的 prompt + completion tokens（即当前轮次落盘后的
-        完整消息体积）；还没有任何 API 请求时退化为估算。累计 tokens 包含已被
-        截断/丢弃的旧消息，会虚高，不拿它除窗口。
+        优先用 current_context_tokens（最近一次 API 响应后真实落盘的消息体积 =
+        prompt + completion）；还没有任何 API 请求时退化为估算。
         """
         prompt = self.total_prompt_tokens
         completion = self.total_completion_tokens
         total = prompt + completion
-        used = self.last_prompt_tokens + self.last_completion_tokens
-        if not used:
-            used = estimate_total_tokens(self.messages)
+        used = self.current_context_tokens or estimate_total_tokens(self.messages)
         pct = used / self.profile["context_tokens"] * 100
         return (
             f"{self.profile['model']} · ctx {pct:.1f}%/"
@@ -352,7 +352,7 @@ class ChatSession:
                 self.total_prompt_tokens += usage.prompt_tokens
                 self.total_completion_tokens += usage.completion_tokens
                 self.last_prompt_tokens = usage.prompt_tokens
-                self.last_completion_tokens = usage.completion_tokens
+                self.current_context_tokens = usage.prompt_tokens + usage.completion_tokens
                 cached = getattr(usage, "cached_tokens", 0) or 0
                 yield Usage(usage.prompt_tokens, usage.completion_tokens, cached,
                             self.total_prompt_tokens + self.total_completion_tokens)
