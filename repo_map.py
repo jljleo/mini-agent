@@ -730,7 +730,7 @@ def search_symbols(root: str, query: str, kind: str | None = None,
     """按关键词检索代码，返回 file:line。维度由 scope 控制：
 
     name（默认）= 符号名称子串（E3 实测：乱命名库下概念性失灵——
-        查询词是模型的语义记忆，与库的任意名字无交集）
+        查询词是模型的语义记忆，与库的任意名字无交集；miss 时自动并跑 docs 兜底）
     path        = 文件路径/文件名片段（烂命名下路径语义仍存，是最后防线）
     docs        = 注释与正文行包含（搜业务语义词，如中文注释"去重"）
     """
@@ -747,16 +747,7 @@ def search_symbols(root: str, query: str, kind: str | None = None,
         return "\n".join(lines) + more
 
     if scope == "docs":
-        hits: list[tuple[str, int, str]] = []
-        for f in discover_source_files(root):
-            rel = os.path.relpath(f, root)
-            try:
-                with open(f, encoding="utf-8") as fh:
-                    for i, line in enumerate(fh.read().splitlines(), 1):
-                        if q in line.lower():
-                            hits.append((rel, i, line.strip()[:60]))
-            except OSError:
-                continue
+        hits = _docs_search_lines(root, q, limit)
         if not hits:
             return f"未找到正文含 '{query}' 的行。可用 read_file 直接读文件，或换关键词重试。"
         hits.sort(key=lambda h: (h[0], h[1]))
@@ -773,7 +764,15 @@ def search_symbols(root: str, query: str, kind: str | None = None,
     matches.sort(key=lambda s: (-s.references, s.line, s.name))
     if not matches:
         hint = f"（kind 过滤 {kind}）" if kind else ""
-        # E4 实测：乱命名库（q1/helper2）name 检索概念性失灵。给可执行的备用维度
+        # E4 实测：乱命名库（q1/helper2）name 检索概念性失灵。主动兜底二连：
+        #   ① 自动并跑 docs 检索（把"模型可能想不到的下一步"变成工具默认做完）
+        #   ② 仍无命中才给引导文本
+        if kind is None:
+            docs_hits = _docs_search_lines(root, q, limit)
+            if docs_hits:
+                dlines = [f"{f}:{i}  {t}" for f, i, t in docs_hits]
+                return (f"名称含 '{query}' 的符号未找到（{hint or '无 kind 过滤'}），但正文命中：\n"
+                        + "\n".join(dlines))
         return (f"未找到名称含 '{query}' 的符号{hint}。若库命名混乱（无意义标识符），"
                 f"可改用 scope=docs 搜业务词（如中文注释/变量名），或 scope=path 按文件路径检索；"
                 f"也可 read_file 直接读文件。")
@@ -781,3 +780,19 @@ def search_symbols(root: str, query: str, kind: str | None = None,
     lines = [f"{s.file}:{s.line}  {s.label}" for s in shown]
     more = f"\n…还有 {len(matches) - len(shown)} 个匹配" if len(matches) > len(shown) else ""
     return "\n".join(lines) + more
+
+
+def _docs_search_lines(root: str, q: str, limit: int) -> list[tuple[str, int, str]]:
+    """docs 检索的共用实现：返回 (文件, 行号, 行文本) 列表。"""
+    hits: list[tuple[str, int, str]] = []
+    for f in discover_source_files(root):
+        rel = os.path.relpath(f, root)
+        try:
+            with open(f, encoding="utf-8") as fh:
+                for i, line in enumerate(fh.read().splitlines(), 1):
+                    if q in line.lower():
+                        hits.append((rel, i, line.strip()[:60]))
+        except OSError:
+            continue
+    hits.sort(key=lambda h: (h[0], h[1]))
+    return hits[:limit]

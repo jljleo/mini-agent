@@ -170,6 +170,27 @@ class TestSearchSymbols:
         out = repo_map.search_symbols(str(root), "不存在的词zzz", scope="docs")
         assert "未找到正文" in out
 
+    def test_name_miss_auto_runs_docs(self, tmp_path):
+        """name miss 自动并跑 docs：符号名烂但注释有业务词 → 直接返回正文命中。"""
+        root = make_project(tmp_path, {
+            "q.py": "# 去重键漏掉渠道导致通知被吞\ndef q1(a, b):\n    return a\n",
+            "other.py": "y = 1\n",
+        })
+        out = repo_map.search_symbols(str(root), "去重")  # 无符号名叫去重 → name miss
+        assert "未找到" in out  # 说明名称未命中
+        assert "q.py:1" in out and "去重" in out  # 但自动补了 docs 命中
+
+    def test_name_miss_no_docs_gives_guidance(self, tmp_path):
+        root = make_project(tmp_path, {"a.py": "x = 1\n"})
+        out = repo_map.search_symbols(str(root), "完全不存在zzz")
+        assert "scope=docs" in out and "scope=path" in out  # 兜底引导
+
+    def test_name_miss_with_kind_does_not_auto_docs(self, tmp_path):
+        """带 kind 过滤时不自动并跑 docs（kind 是符号语义，正文行无 kind）。"""
+        root = make_project(tmp_path, {"a.py": "# 去重\ndef q1():\n    pass\n"})
+        out = repo_map.search_symbols(str(root), "去重", kind="class")
+        assert "scope=docs" in out  # 只有引导，无 docs 结果
+
 
 # ---------- 缓存失效（编辑后刷新）----------
 
