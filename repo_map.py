@@ -726,9 +726,46 @@ def syntax_diagnostics(source: str, relpath: str, limit: int = 5) -> list[str]:
 
 
 def search_symbols(root: str, query: str, kind: str | None = None,
-                   limit: int = 20) -> str:
-    index = _get_index(root)
+                   limit: int = 20, scope: str = "name") -> str:
+    """按关键词检索代码，返回 file:line。维度由 scope 控制：
+
+    name（默认）= 符号名称子串（E3 实测：乱命名库下概念性失灵——
+        查询词是模型的语义记忆，与库的任意名字无交集）
+    path        = 文件路径/文件名片段（烂命名下路径语义仍存，是最后防线）
+    docs        = 注释与正文行包含（搜业务语义词，如中文注释"去重"）
+    """
     q = query.lower()
+    more = ""
+    if scope == "path":
+        index = _get_index(root)
+        files = sorted({s.file for s in index.symbols if q in s.file.lower()})
+        if not files:
+            return f"未找到路径含 '{query}' 的文件。可用 read_file 直接读文件，或换关键词重试。"
+        shown = files[:limit]
+        lines = [f"{f}  {f}" for f in shown]
+        more = f"\n…还有 {len(files) - len(shown)} 个" if len(files) > len(shown) else ""
+        return "\n".join(lines) + more
+
+    if scope == "docs":
+        hits: list[tuple[str, int, str]] = []
+        for f in discover_source_files(root):
+            rel = os.path.relpath(f, root)
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    for i, line in enumerate(fh.read().splitlines(), 1):
+                        if q in line.lower():
+                            hits.append((rel, i, line.strip()[:60]))
+            except OSError:
+                continue
+        if not hits:
+            return f"未找到正文含 '{query}' 的行。可用 read_file 直接读文件，或换关键词重试。"
+        hits.sort(key=lambda h: (h[0], h[1]))
+        shown = hits[:limit]
+        lines = [f"{f}:{i}  {t}" for f, i, t in shown]
+        more = f"\n…还有 {len(hits) - len(shown)} 个" if len(hits) > len(shown) else ""
+        return "\n".join(lines) + more
+
+    index = _get_index(root)
     matches = [
         s for s in index.symbols
         if q in s.name.lower() and (kind is None or s.kind == kind)

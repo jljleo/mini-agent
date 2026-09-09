@@ -143,6 +143,33 @@ class TestSearchSymbols:
         out = repo_map.search_symbols(str(root), "mywidget")
         assert "MyWidget" in out
 
+    def test_path_scope_finds_file_by_fragment(self, tmp_path):
+        """path 维度：烂命名/记不住名字时按路径片段找文件。"""
+        root = make_project(tmp_path, {
+            "pkg/worker/helpers.py": "def q1(x):\n    return x\n",
+            "pkg/main.py": "print(1)\n",
+        })
+        out = repo_map.search_symbols(str(root), "worker/helpers", scope="path")
+        assert "pkg/worker/helpers.py" in out
+        out2 = repo_map.search_symbols(str(root), "HELPERS", scope="path")  # 大小写不敏感
+        assert "pkg/worker/helpers.py" in out2
+        assert "main.py" not in out2
+
+    def test_docs_scope_finds_business_words(self, tmp_path):
+        """docs 维度：符号名烂但注释/正文有业务词 → 仍能定位。"""
+        root = make_project(tmp_path, {
+            "x.py": "# 去重键漏掉了渠道，导致通知被吞\ndef q1(a, b):\n    return a\n",
+            "y.py": "y = 1\n",
+        })
+        out = repo_map.search_symbols(str(root), "去重", scope="docs")
+        assert "x.py:1" in out and "去重" in out
+        assert "y.py" not in out
+
+    def test_docs_scope_miss_guidance(self, tmp_path):
+        root = make_project(tmp_path, {"a.py": "x = 1\n"})
+        out = repo_map.search_symbols(str(root), "不存在的词zzz", scope="docs")
+        assert "未找到正文" in out
+
 
 # ---------- 缓存失效（编辑后刷新）----------
 

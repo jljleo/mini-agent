@@ -69,22 +69,29 @@ def search_tools() -> str:
     "Search for code symbols (classes, functions, methods, imports, constants) "
     "across the codebase by name. Use this to locate code instead of blind "
     "read_file + grep. Returns matches with file:line, kind and reference count "
-    "(how many places reference it, higher = more core).",
+    "(how many places reference it, higher = more core). "
+    "Optional scope: name (default, symbol names), path (file path fragments), "
+    "docs (lines of comments/code containing the query — useful when symbol "
+    "names are meaningless, e.g. q1/helper2, search business words like 去重/dedupe).",
     {
         "query": {
             "type": "string",
-            "description": "Substring to match against symbol names (case-insensitive).",
+            "description": "Substring to match (case-insensitive).",
         },
         "kind": {
             "type": "string",
-            "description": "Optional filter: class / function / method / import / constant.",
+            "description": "Optional filter: class / function / method / import / constant. Only used with scope=name.",
+        },
+        "scope": {
+            "type": "string",
+            "description": "name (default) / path / docs.",
         },
     },
     ["query"],
 )
-def search_symbols(query: str, kind: str | None = None) -> str:
-    """按名称检索代码符号。只读、围栏内（索引本项目源码），无需确认。"""
-    return repo_map.search_symbols(PROJECT_ROOT, query, kind)
+def search_symbols(query: str, kind: str | None = None, scope: str = "name") -> str:
+    """按维度检索代码符号/路径/正文。只读、围栏内，无需确认。"""
+    return repo_map.search_symbols(PROJECT_ROOT, query, kind, scope=scope)
 
 
 # ---------- 文件窄接口工具：路径围栏 + 免确认 ----------
