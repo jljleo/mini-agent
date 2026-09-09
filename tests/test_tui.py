@@ -357,9 +357,9 @@ def test_completion_up_down_and_enter_select():
             second = app.dock.selected_completion_id()
             assert second is not None and second != first  # 下移后选中项变了
 
-            app.submit_text("/")  # 回车：应选中高亮项而非提交 "/"
+            app.submit_text("/")  # 回车：选中高亮项并直接执行，不再二次确认
             await pilot.pause()
-            assert prompt.value == second
+            assert prompt.value == ""
             assert app.dock.has_completion() is False
 
     run(scenario())

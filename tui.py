@@ -319,10 +319,8 @@ class Dock(Vertical):
         if self._model_mode:
             self.post_message(ModelSelected(event.option_id))
         else:
-            prompt = self.query_one("#prompt", Input)
-            prompt.value = event.option_id
-            self.hide_completion()
-            prompt.focus()
+            # 鼠标点击补全项：直接执行，不要只回填再让用户按第二次回车
+            self.app.submit_text(event.option_id)
 
     def queued_text(self) -> str:
         if not self._queued:
@@ -465,7 +463,8 @@ class MiniAgentApp(App):
         self.exit()
 
     def submit_text(self, raw: str) -> None:
-        # 补全可见时：回车选中当前高亮项，而非提交未写全的命令
+        # 补全可见时：回车选中当前高亮项并直接执行（一键完成）。
+        # 模型选择模式单独处理：Enter 切换档案；命令模式 Enter 执行命令。
         if self.dock.has_completion():
             selected = self.dock.selected_completion_id()
             if selected is not None:
@@ -475,7 +474,7 @@ class MiniAgentApp(App):
                     prompt = self.query_one("#prompt", Input)
                     prompt.value = selected
                     self.dock.hide_completion()
-                    prompt.focus()
+                    self.submit_text(selected)
                 return
 
         question = sanitize(raw)
