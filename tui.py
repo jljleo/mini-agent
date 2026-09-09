@@ -23,6 +23,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
+from textual.screen import ModalScreen
 from textual.widgets import Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -30,7 +31,7 @@ import commands  # noqa: F401  集中式注册：导入即触发 @command 注册
 import ui
 from agent import ChatSession
 from command_registry import COMMANDS
-from config import MODEL, QUIT_COMMANDS, format_context_tokens
+from config import MODEL, QUIT_COMMANDS, format_context_tokens, get_profile, list_profiles
 from events import (
     Note,
     ReasoningDelta,
@@ -337,6 +338,58 @@ class TextualApprovalChannel:
         self._answered.set()
 
 
+class ModelSelectScreen(ModalScreen[str | None]):
+    """交互式模型档案选择器：↑↓ 选择，Enter 确认，Esc 取消。"""
+
+    CSS = """
+    ModelSelectScreen { align: center middle; }
+    #model-select-dialog {
+        width: 70;
+        height: auto;
+        max-height: 22;
+        border: thick $background 80%;
+        background: $surface;
+        padding: 0 1;
+    }
+    #model-select-title {
+        text-align: center;
+        color: $text-muted;
+        padding: 1 0;
+    }
+    #model-select-list { height: auto; max-height: 16; }
+    """
+
+    def __init__(self, session: ChatSession) -> None:
+        self.session = session
+        super().__init__()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="model-select-dialog"):
+            yield Static("选择模型档案 (↑↓ · Enter · Esc)", id="model-select-title")
+            options = []
+            for pname in list_profiles():
+                marker = "● " if pname == self.session.profile_name else "  "
+                profile = get_profile(pname)
+                ctx = format_context_tokens(profile["context_tokens"])
+                label = f"{marker}{pname} · {profile['model']} · ctx {ctx}"
+                options.append(Option(label, id=pname))
+            yield OptionList(*options, id="model-select-list")
+
+    def on_mount(self) -> None:
+        option_list = self.query_one("#model-select-list", OptionList)
+        for i, opt in enumerate(option_list.options):
+            if opt.id == self.session.profile_name:
+                option_list.highlighted = i
+                break
+
+    @on(OptionList.OptionSelected, "#model-select-list")
+    def _on_select(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option_id)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
+
+
 class MiniAgentApp(App):
     CSS = """
     Screen { layout: vertical; }
@@ -462,6 +515,10 @@ class MiniAgentApp(App):
         if question.lower() in QUIT_COMMANDS:
             return "quit"
         name, _, args = question.partition(" ")
+        if name == "/model" and not args.strip():
+            # TUI 下 /model 无参数时进入交互式选择，比静态列表更好用
+            self.push_screen(ModelSelectScreen(self.session), callback=self._on_model_selected)
+            return True
         if name in COMMANDS:
             self._run_slash_command(name, args.strip())
             return True
@@ -469,6 +526,19 @@ class MiniAgentApp(App):
             self.transcript.write(Text(f"未知命令: {name}（输入 /help 查看可用命令）", style="yellow"))
             return "prefill"
         return False
+
+    def _on_model_selected(self, profile_name: str | None) -> None:
+        if profile_name is None:
+            return
+        try:
+            self.session.set_profile(profile_name)
+        except RuntimeError as exc:
+            self.transcript.write(Text(str(exc), style="yellow"))
+            return
+        self.dock.set_status(self.session.status_text())
+        self.transcript.write(
+            Text(f"已切换模型档案：{profile_name}（{self.session.profile['model']}）")
+        )
 
     def _run_slash_command(self, name: str, args: str) -> None:
         buffer = io.StringIO()
