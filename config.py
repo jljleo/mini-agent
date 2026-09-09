@@ -129,6 +129,24 @@ def format_context_tokens(n: int | None = None) -> str:
         n = CONTEXT_TOKENS
     return f"{n / 1_000_000:.1f}M" if n >= 1_000_000 else f"{n // 1000}K"
 
+
+def format_tokens(n: int) -> str:
+    """token 数的紧凑显示：0 / 999 / 1.5K / 15K / 1.5M。
+
+    规则：
+    - <1K 显示精确值
+    - 1K~10K 保留一位小数（如 1.5K）
+    - ≥10K 显示整数 K
+    - ≥1M 显示一位小数 M
+    """
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 10_000:
+        return f"{n // 1_000}K"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
 # --- agent 循环 ---
 # 无硬性轮次上限：交互场景人在看（业界交互模式均不设上限），失控防线是下面的
 # 行为保险丝。bench 等无人值守场景的上限应加在调用侧，不污染交互循环。

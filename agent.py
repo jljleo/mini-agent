@@ -39,6 +39,7 @@ from config import (
     SYSTEM_MESSAGES,
     TOOL_RESULT_PREVIEW_LEN,
     format_context_tokens,
+    format_tokens,
     get_profile,
 )
 from events import (
@@ -164,7 +165,7 @@ class ChatSession:
         return (
             f"{self.profile['model']} · ctx {pct:.1f}%/"
             f"{format_context_tokens(self.profile['context_tokens'])} · "
-            f"tokens {prompt:,}+{completion:,}={total:,}"
+            f"tokens {format_tokens(prompt)}+{format_tokens(completion)}={format_tokens(total)}"
         )
 
     # ---- 历史管理 ----
