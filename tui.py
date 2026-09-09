@@ -23,7 +23,6 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
-from textual.screen import ModalScreen
 from textual.widgets import Input, Markdown, OptionList, Static
 from textual.widgets.option_list import Option
 
@@ -78,6 +77,12 @@ class KernelDone(Message):
     def __init__(self, error: Exception | None = None) -> None:
         super().__init__()
         self.error = error
+
+
+class ModelSelected(Message):
+    def __init__(self, profile_name: str) -> None:
+        super().__init__()
+        self.profile_name = profile_name
 
 
 class TranscriptView(VerticalScroll):
@@ -211,6 +216,7 @@ class Dock(Vertical):
     def __init__(self) -> None:
         super().__init__(id="dock")
         self._queued: list[str] = []
+        self._model_mode = False
 
     def compose(self) -> ComposeResult:
         yield Static("", id="approval")
@@ -227,11 +233,41 @@ class Dock(Vertical):
     # ---- 斜杠命令补全（迁移自 prompt_toolkit 的 SlashCommandCompleter）----
 
     def _update_completion(self, value: str) -> None:
-        """输入以 / 开头时，弹出匹配命令的下拉提示；否则收起。"""
+        """输入以 / 开头时，弹出匹配命令的下拉提示；否则收起。
+
+        特殊处理 /model：直接在下拉框里列出可选档案，像命令补全一样上下选择。
+        """
         completion = self.query_one("#completion", OptionList)
         if not value.startswith("/"):
             completion.display = False
+            self._model_mode = False
             return
+
+        # /model 无参数时：列出档案供选择
+        if value == "/model":
+            self._model_mode = True
+            profiles = list_profiles()
+            max_name_len = max(len(p) for p in profiles)
+            max_model_len = max(len(get_profile(p)["model"]) for p in profiles)
+            options = []
+            for pname in profiles:
+                profile = get_profile(pname)
+                is_current = pname == self.session.profile_name
+                marker = Text("●", style="green" if is_current else "dim")
+                name_text = Text(f"{pname:<{max_name_len}}", style="bold" if is_current else "")
+                model_text = Text(f"{profile['model']:<{max_model_len}}", style="dim")
+                ctx_text = Text(
+                    f"ctx {format_context_tokens(profile['context_tokens']):>6}", style="cyan"
+                )
+                label = Text.assemble(marker, "  ", name_text, "  ", model_text, "  ", ctx_text)
+                options.append(Option(label, id=pname))
+            completion.clear_options()
+            completion.add_options(options)
+            completion.highlighted = 0
+            completion.display = True
+            return
+
+        self._model_mode = False
         # /quit 不在 COMMANDS（走主循环退出词表），补全里单独补上
         candidates = {**COMMANDS, "/quit": None}
         options = [
@@ -258,10 +294,14 @@ class Dock(Vertical):
             completion.action_cursor_down()
 
     def selected_completion_id(self) -> str | None:
-        """返回当前高亮的补全项 id（命令名）；无高亮返回 None。"""
+        """返回当前高亮的补全项 id（命令名/档案名）；无高亮返回 None。"""
         completion = self.query_one("#completion", OptionList)
         highlighted = completion.highlighted_option
         return highlighted.id if highlighted is not None else None
+
+    def is_model_selection(self) -> bool:
+        """当前补全列表是否处于 /model 档案选择模式。"""
+        return self._model_mode
 
     def has_completion(self) -> bool:
         return self.query_one("#completion", OptionList).display
@@ -275,10 +315,13 @@ class Dock(Vertical):
 
     @on(OptionList.OptionSelected)
     def _on_option_selected(self, event: OptionList.OptionSelected) -> None:
-        prompt = self.query_one("#prompt", Input)
-        prompt.value = event.option_id
-        self.hide_completion()
-        prompt.focus()
+        if self._model_mode:
+            self.post_message(ModelSelected(event.option_id))
+        else:
+            prompt = self.query_one("#prompt", Input)
+            prompt.value = event.option_id
+            self.hide_completion()
+            prompt.focus()
 
     def queued_text(self) -> str:
         if not self._queued:
@@ -336,58 +379,6 @@ class TextualApprovalChannel:
             return
         self._result = yes
         self._answered.set()
-
-
-class ModelSelectScreen(ModalScreen[str | None]):
-    """交互式模型档案选择器：↑↓ 选择，Enter 确认，Esc 取消。"""
-
-    CSS = """
-    ModelSelectScreen { align: center middle; }
-    #model-select-dialog {
-        width: 70;
-        height: auto;
-        max-height: 22;
-        border: thick $background 80%;
-        background: $surface;
-        padding: 0 1;
-    }
-    #model-select-title {
-        text-align: center;
-        color: $text-muted;
-        padding: 1 0;
-    }
-    #model-select-list { height: auto; max-height: 16; }
-    """
-
-    def __init__(self, session: ChatSession) -> None:
-        self.session = session
-        super().__init__()
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="model-select-dialog"):
-            yield Static("选择模型档案 (↑↓ · Enter · Esc)", id="model-select-title")
-            options = []
-            for pname in list_profiles():
-                marker = "● " if pname == self.session.profile_name else "  "
-                profile = get_profile(pname)
-                ctx = format_context_tokens(profile["context_tokens"])
-                label = f"{marker}{pname} · {profile['model']} · ctx {ctx}"
-                options.append(Option(label, id=pname))
-            yield OptionList(*options, id="model-select-list")
-
-    def on_mount(self) -> None:
-        option_list = self.query_one("#model-select-list", OptionList)
-        for i, opt in enumerate(option_list.options):
-            if opt.id == self.session.profile_name:
-                option_list.highlighted = i
-                break
-
-    @on(OptionList.OptionSelected, "#model-select-list")
-    def _on_select(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(event.option_id)
-
-    def key_escape(self) -> None:
-        self.dismiss(None)
 
 
 class MiniAgentApp(App):
@@ -477,10 +468,13 @@ class MiniAgentApp(App):
         if self.dock.has_completion():
             selected = self.dock.selected_completion_id()
             if selected is not None:
-                prompt = self.query_one("#prompt", Input)
-                prompt.value = selected
-                self.dock.hide_completion()
-                prompt.focus()
+                if self.dock.is_model_selection():
+                    self._switch_profile(selected)
+                else:
+                    prompt = self.query_one("#prompt", Input)
+                    prompt.value = selected
+                    self.dock.hide_completion()
+                    prompt.focus()
                 return
 
         question = sanitize(raw)
@@ -515,10 +509,6 @@ class MiniAgentApp(App):
         if question.lower() in QUIT_COMMANDS:
             return "quit"
         name, _, args = question.partition(" ")
-        if name == "/model" and not args.strip():
-            # TUI 下 /model 无参数时进入交互式选择，比静态列表更好用
-            self.push_screen(ModelSelectScreen(self.session), callback=self._on_model_selected)
-            return True
         if name in COMMANDS:
             self._run_slash_command(name, args.strip())
             return True
@@ -527,9 +517,7 @@ class MiniAgentApp(App):
             return "prefill"
         return False
 
-    def _on_model_selected(self, profile_name: str | None) -> None:
-        if profile_name is None:
-            return
+    def _switch_profile(self, profile_name: str) -> None:
         try:
             self.session.set_profile(profile_name)
         except RuntimeError as exc:
@@ -539,6 +527,14 @@ class MiniAgentApp(App):
         self.transcript.write(
             Text(f"已切换模型档案：{profile_name}（{self.session.profile['model']}）")
         )
+        prompt = self.query_one("#prompt", Input)
+        prompt.value = ""
+        self.dock.hide_completion()
+        prompt.focus()
+
+    @on(ModelSelected)
+    def _on_model_selected(self, event: ModelSelected) -> None:
+        self._switch_profile(event.profile_name)
 
     def _run_slash_command(self, name: str, args: str) -> None:
         buffer = io.StringIO()
