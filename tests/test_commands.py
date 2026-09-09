@@ -10,7 +10,7 @@ import pytest
 import agent
 import commands
 import tools
-from commands import cmd_clear, cmd_compact, cmd_resume, cmd_tokens
+from commands import cmd_clear, cmd_compact, cmd_model, cmd_resume, cmd_tokens
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +65,32 @@ class TestResume:
         assert session.messages[-1]["content"] == "上次的话题"
         assert session.total_prompt_tokens == 42
         assert "最近话题" in capsys.readouterr().out
+
+
+class TestModel:
+    def test_lists_profiles(self, session, capsys):
+        cmd_model(session, "")
+        out = capsys.readouterr().out
+        assert "kimi" in out
+        assert "deepseek" in out
+
+    def test_switches_profile(self, session, monkeypatch, capsys):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+        cmd_model(session, "deepseek")
+        assert session.profile_name == "deepseek"
+        assert session.profile["model"] == "deepseek-chat"
+        assert "已切换" in capsys.readouterr().out
+
+    def test_unknown_profile_warns(self, session, capsys):
+        cmd_model(session, "notexist")
+        assert "未知模型档案" in capsys.readouterr().out
+
+    def test_missing_key_keeps_original_profile(self, session, monkeypatch, capsys):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+        original = session.profile_name
+        cmd_model(session, "deepseek")
+        assert "缺少 API key" in capsys.readouterr().out
+        assert session.profile_name == original
 
 
 class TestCompact:

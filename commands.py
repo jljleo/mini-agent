@@ -23,7 +23,14 @@ from compact import (
     extract_middle,
     summarize_middle,
 )
-from config import QUIT_COMMANDS, SESSION_FILE, SYSTEM_MESSAGES, TRUNCATE_LOW_TOKENS
+from config import (
+    QUIT_COMMANDS,
+    SESSION_FILE,
+    SYSTEM_MESSAGES,
+    format_context_tokens,
+    get_profile,
+    list_profiles,
+)
 from tool_registry import TOOLS
 from tools import clear_todo_file
 
@@ -96,6 +103,29 @@ def cmd_resume(session: ChatSession, args: str = ""):
         ui.note(f"最近话题：{last_user[:50]}{'...' if len(last_user) > 50 else ''}")
 
 
+@command("/model", "列出或切换模型档案：/model 显示列表；/model <profile> 切换")
+def cmd_model(session: ChatSession, args: str = ""):
+    name = args.strip()
+    if not name:
+        rows = []
+        for pname in list_profiles():
+            marker = "●" if pname == session.profile_name else "○"
+            p = get_profile(pname)
+            rows.append((
+                f"{marker} {pname}",
+                f"{p['model']} · ctx {format_context_tokens(p['context_tokens'])}",
+            ))
+        _render_rows(rows)
+        return
+    try:
+        session.set_profile(name)
+        ui.success(f"已切换模型档案：{name}（{session.profile['model']}）")
+    except KeyError:
+        ui.warn(f"未知模型档案：{name}；可用：{', '.join(list_profiles())}")
+    except RuntimeError as exc:
+        ui.warn(str(exc))
+
+
 @command("/compact", "主动压缩早期历史（L2 摘要，失败回退硬切）")
 def cmd_compact(session: ChatSession, args: str = ""):
     # 手动压缩语义：用户下令即执行，不受自动水位线限制——直接向 LOW 水位切；
@@ -105,7 +135,7 @@ def cmd_compact(session: ChatSession, args: str = ""):
         detect_slim_targets(session.messages, trigger_chars=0, min_savings=0),
     ))
     before = estimate_total_tokens(slimmed)
-    cut = detect_truncation_point(slimmed, TRUNCATE_LOW_TOKENS)
+    cut = detect_truncation_point(slimmed, session.profile["truncate_low_tokens"])
     if not cut:
         ui.note(f"当前历史约 {before:,} tokens，规模健康，无需压缩")
         return

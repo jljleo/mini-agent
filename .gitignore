@@ -5,6 +5,7 @@ __pycache__/
 .chat_history
 session_todos.json
 .session.json
+models.json
 bench/results/
 # 个人笔记/设计文档：只保留本地，不进仓库
 ROADMAP.md

@@ -1,0 +1,14 @@
+{
+  "deepseek": {
+    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "context_tokens": 64000
+  },
+  "local": {
+    "model": "qwen2.5-coder",
+    "base_url": "http://localhost:11434/v1",
+    "api_key_env": "LOCAL_API_KEY",
+    "context_tokens": 128000
+  }
+}

@@ -147,8 +147,10 @@ def apply_model(model: str | None) -> None:
     """--model= 覆盖评测模型（默认 config.MODEL）。bench 结果带 model 标记。"""
     global MODEL_IN_USE
     if model:
-        import agent
-        agent.MODEL = model
+        import config
+        profile = config.MODEL_PROFILE
+        config.MODEL_PROFILES[profile]["model"] = model
+        config.apply_profile(profile)
         print(f"[bench] 评测模型: {model}")
     MODEL_IN_USE = model or _default_model()
 

@@ -1,4 +1,4 @@
-"""模型档案（config.MODEL_PROFILES）行为契约测试。
+"""模型档案（config.MODEL_PROFILES + models.json）行为契约测试。
 
 多模型适配的唯一事实来源是 config 的档案表：选择器（MINI_AGENT_MODEL）决定
 MODEL/BASE_URL/API_KEY_ENV/CONTEXT_TOKENS，L1 截断水位随档案的上下文窗口走。
@@ -6,6 +6,7 @@ MODEL/BASE_URL/API_KEY_ENV/CONTEXT_TOKENS，L1 截断水位随档案的上下文
 """
 
 import importlib
+import json
 
 import pytest
 
@@ -13,14 +14,21 @@ import config
 
 
 @pytest.fixture
-def reload_config(monkeypatch):
+def reload_config(monkeypatch, tmp_path):
     """按档案名重载 config（None = 未设环境变量的默认路径），收尾恢复默认。"""
-    def _reload(name: str | None):
+    def _reload(name: str | None, user_profiles: dict | None = None):
         if name is None:
             monkeypatch.delenv("MINI_AGENT_MODEL", raising=False)
         else:
             monkeypatch.setenv("MINI_AGENT_MODEL", name)
         importlib.reload(config)
+        # 隔离用户自定义档案：避免测试机上的 models.json 污染
+        config._USER_MODELS_JSON = str(tmp_path / "models.json")
+        if user_profiles is not None:
+            with open(config._USER_MODELS_JSON, "w", encoding="utf-8") as f:
+                json.dump(user_profiles, f)
+        config.refresh_user_profiles()
+        config.apply_profile(name or "kimi")
 
     yield _reload
     monkeypatch.delenv("MINI_AGENT_MODEL", raising=False)
@@ -57,6 +65,37 @@ def test_unknown_profile_fails_fast(reload_config):
     # 拼错的档案名必须在启动时炸出来（带可选名单），而不是静默落到某个模型上
     with pytest.raises(SystemExit, match="未知模型档案"):
         reload_config("kimi-typo")
+
+
+def test_user_profiles_override_builtin(reload_config):
+    # 项目根 models.json 里的档案覆盖内置同名档案，且新增档案可用
+    reload_config("kimi", user_profiles={
+        "kimi": {
+            "model": "kimi-override",
+            "base_url": "https://override.cn/v1",
+            "api_key_env": "OVERRIDE_KEY",
+            "context_tokens": 256_000,
+        },
+        "custom": {
+            "model": "custom-model",
+            "base_url": "https://custom.example.com/v1",
+            "api_key_env": "CUSTOM_KEY",
+            "context_tokens": 100_000,
+        },
+    })
+    assert config.MODEL == "kimi-override"
+    assert config.BASE_URL == "https://override.cn/v1"
+    assert config.API_KEY_ENV == "OVERRIDE_KEY"
+    assert config.CONTEXT_TOKENS == 256_000
+    assert "custom" in config.list_profiles()
+
+
+def test_get_profile_returns_normalized_dict(reload_config):
+    reload_config("qwen")
+    p = config.get_profile("qwen")
+    assert p["model"] == "qwen-plus"
+    assert p["truncate_high_tokens"] == p["context_tokens"] - 28_000
+    assert p["truncate_low_tokens"] == int(p["truncate_high_tokens"] * 0.6)
 
 
 def test_format_context_tokens():
