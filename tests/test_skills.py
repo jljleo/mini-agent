@@ -59,6 +59,15 @@ class TestScan:
         make_skill(tmp_path, "ok")
         assert [s.name for s in scan_skills(str(tmp_path))] == ["commit-style"]
 
+    def test_garbled_skill_file_skipped(self, tmp_path):
+        """非 UTF-8 的 SKILL.md 抛 UnicodeDecodeError（ValueError 子类，不是 OSError），
+        必须纳入 per-skill 容错——dogfood review 首跑抓到的真 bug。"""
+        bad = tmp_path / "skills" / "bad"
+        bad.mkdir(parents=True)
+        (bad / "SKILL.md").write_bytes(b"\xff\xfe\x00\x01")
+        make_skill(tmp_path, "ok")
+        assert [s.name for s in scan_skills(str(tmp_path))] == ["commit-style"]
+
 
 class TestFormat:
     def test_none_when_empty(self):

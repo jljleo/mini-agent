@@ -73,8 +73,9 @@ def scan_skills(root: str) -> list[Skill]:
         try:
             with open(skill_path, encoding="utf-8") as fh:
                 text = fh.read()
-        except OSError:
-            continue  # 目录存在但 SKILL.md 不可读：跳过这个 skill，不拖垮其余
+        except (OSError, UnicodeDecodeError):
+            continue  # 目录存在但 SKILL.md 不可读/乱码：跳过这个 skill，不拖垮其余
+            # （UnicodeDecodeError 是 ValueError 子类而非 OSError——review dogfood 抓到）
         fields, body = _parse_frontmatter(text)
         rel_path = os.path.join(SKILLS_DIR, entry.name, SKILL_FILE)
         skills.append(Skill(
