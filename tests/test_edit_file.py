@@ -8,8 +8,8 @@
 
 import pytest
 
-import tools
-from tools import edit_file, write_file
+import mini_agent.tools.builtin as tools
+from mini_agent.tools.builtin import edit_file, write_file
 
 
 @pytest.fixture

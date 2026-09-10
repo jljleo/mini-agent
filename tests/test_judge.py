@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from judge import _coerce, _parse_score, judge
+from mini_agent.eval.judge import _coerce, _parse_score, judge
 
 
 def _client(content):

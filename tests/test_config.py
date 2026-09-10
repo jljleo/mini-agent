@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-import config
+import mini_agent.config as config
 
 
 @pytest.fixture

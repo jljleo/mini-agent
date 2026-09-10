@@ -26,16 +26,10 @@ dependencies = [
 ]
 
 [project.scripts]
-mini-agent = "main:main"
+mini-agent = "mini_agent.main:main"
 
 [tool.hatch.build.targets.wheel]
-only-include = [
-    "agent.py", "bridge.py", "command_registry.py", "commands.py", "compact.py",
-    "config.py", "events.py", "gitdiff.py", "input_utils.py", "judge.py", "main.py",
-    "repo_map.py", "stream_segments.py", "streaming.py", "tool_registry.py",
-    "tools.py", "trace.py", "ui.py",
-    "models.default.json",
-]
+packages = ["mini_agent"]  # 正经包：models.default.json 作为 package data 自动随包
 
 [tool.ruff]
 target-version = "py313"
@@ -52,4 +46,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent", "bench", "command_registry", "commands", "compact", "config", "events", "gitdiff", "input_utils", "judge", "streaming", "tool_registry", "tools", "trace", "ui"]
+known-first-party = ["mini_agent", "bench"]

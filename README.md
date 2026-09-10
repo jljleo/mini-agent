@@ -54,22 +54,18 @@ cp .env.example .env   # 填入 API key：默认档案 kimi-code 用 KIMI_CODE_A
 ## 项目结构
 
 ```
-main.py           入口（tty/管道单一主循环）
-agent.py          会话内核（事件生产者）
-events.py         事件定义（内核/UI 解耦）
-bridge.py         线程桥（打断/优雅收尾）
-streaming.py      流式组装
-compact.py        三级上下文压缩
-repo_map.py       tree-sitter 代码库感知
-tools.py          工具实现（@tool 注册）
-tool_registry.py  工具分档与 schema
-commands.py       斜杠命令
-config.py         运行时配置（模型档案、子 agent 类型、阈值）
-bench/            benchmark 任务包与驱动
-trace.py          逐事件轨迹记录（JSONL）
-judge.py          LLM-as-judge 评分
-tests/            行为契约测试
-AGENTS.md         面向 AI 协作者的仓库约定
+mini_agent/
+├── main.py           入口（tty/管道单一主循环）
+├── config.py         运行时配置（模型档案、子 agent 类型、阈值）
+├── repo_map.py       tree-sitter 代码库感知
+├── kernel/           事件生产者（agent / streaming / compact / events / bridge）
+├── tools/            工具实现与注册表（builtin / registry / gitdiff）
+├── commands/         斜杠命令实现与注册表（builtin / registry）
+├── ui/               界面层（renderer / input / segments）
+└── eval/             评测支撑（judge / trace）
+bench/                benchmark 任务包与驱动
+tests/                行为契约测试
+AGENTS.md             面向 AI 协作者的仓库约定
 ```
 
 ## 许可证

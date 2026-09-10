@@ -5,7 +5,8 @@
 
 import json
 
-from events import (
+from mini_agent.eval.trace import TraceRecorder
+from mini_agent.kernel.events import (
     StreamFinished,
     StreamStart,
     TextDelta,
@@ -14,7 +15,6 @@ from events import (
     TurnEnd,
     Usage,
 )
-from trace import TraceRecorder
 
 
 def _finish():

@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-import command_registry
-import tool_registry
-import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册（与 main.py 同一机制）
-from tool_registry import TOOLS, get_resident_tool_schemas, tool
+import mini_agent.commands.registry as command_registry
+import mini_agent.tools.builtin as tools  # noqa: F401  集中式注册：导入即触发 @tool 注册（与 main.py 同一机制）
+import mini_agent.tools.registry as tool_registry
+from mini_agent.tools.registry import TOOLS, get_resident_tool_schemas, tool
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ class TestToolRegistry:
     def test_resident_name_typo_fails_fast(self, clean_tools):
         """名单写错名字当场 KeyError，好过静默漏挂一个工具。"""
         monkeypatched = ("read_file", "typo_tool")
-        import tool_registry as tr
+        import mini_agent.tools.registry as tr
         original = tr.RESIDENT_TOOL_NAMES
         tr.RESIDENT_TOOL_NAMES = monkeypatched
         try:
@@ -121,12 +121,12 @@ class TestCommandRegistry:
         """所有已注册命令必须接受 (session, args) 签名。"""
         import inspect
 
-        import commands  # noqa: F401  触发注册
+        import mini_agent.commands.builtin as commands  # noqa: F401  触发注册
         for name, fn in command_registry.COMMANDS.items():
             params = list(inspect.signature(fn).parameters)
             assert len(params) >= 2, f"{name} 签名不符合 (session, args) 约定"
 
     def test_core_commands_registered(self):
-        import commands  # noqa: F401
+        import mini_agent.commands.builtin as commands  # noqa: F401
         for name in ("/clear", "/resume", "/model", "/compact"):
             assert name in command_registry.COMMANDS

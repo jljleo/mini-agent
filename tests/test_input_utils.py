@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from input_utils import read_input
+from mini_agent.ui.input import read_input
 
 
 class FakeStdin:

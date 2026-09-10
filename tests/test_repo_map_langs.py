@@ -6,7 +6,7 @@
 
 import os
 
-import repo_map
+import mini_agent.repo_map as repo_map
 
 
 def kinds_of(src, relpath):

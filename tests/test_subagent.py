@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-import config
-import tools
-from events import StreamFinished, StreamStart, TurnEnd
-from tool_registry import TOOLS
+import mini_agent.config as config
+import mini_agent.tools.builtin as tools
+from mini_agent.kernel.events import StreamFinished, StreamStart, TurnEnd
+from mini_agent.tools.registry import TOOLS
 
 
 @pytest.fixture
@@ -172,7 +172,7 @@ def test_denial_below_limit_returns_reason_unchanged(clean_subagent_context):
 
 def test_spawn_subagent_result_reports_denials(clean_subagent_context, monkeypatch):
     """拒绝信息回传：子 agent 运行中被拒的次数附在结论里，主 agent 据此自我修正边界。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     monkeypatch.setattr(tools, "_check_permission", lambda cmd: "ask")
 
@@ -208,7 +208,7 @@ def _stub_chat_network(session, monkeypatch):
 
 def _drive_search_tools_injection(session, monkeypatch):
     """驱动一轮 chat：第一轮调 search_tools，第二轮出终稿。返回注入的 tools 声明。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     state = {"n": 0}
 
@@ -229,7 +229,7 @@ def _drive_search_tools_injection(session, monkeypatch):
 
 def test_injection_filters_hidden_tools_for_subagent(clean_subagent_context, monkeypatch):
     """内核动态声明注入也过滤元工具（与 search_tools 返回文本过滤是同一道防线的两层）。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     monkeypatch.setenv("MOONSHOT_API_KEY", "test-key")
     session = agent_module.ChatSession(depth=1)  # 子 agent 会话
@@ -244,7 +244,7 @@ def test_injection_filters_hidden_tools_for_subagent(clean_subagent_context, mon
 
 def test_injection_unfiltered_for_main_agent(monkeypatch):
     """主 agent（depth=0）注入不过滤：spawn_subagent 已常驻，扩展档只包含其余可发现工具。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     monkeypatch.setenv("MOONSHOT_API_KEY", "test-key")
     session = agent_module.ChatSession(depth=0)
@@ -269,7 +269,7 @@ def test_run_bash_outside_subagent_still_asks_human(monkeypatch, clean_subagent_
 
 def test_spawn_subagent_returns_only_conclusion(clean_subagent_context, monkeypatch):
     """上下文隔离契约：新会话、受限工具集、depth+1，只回最后 assistant 正文。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     events = [StreamStart(), StreamFinished([{"role": "assistant", "content": "结论：已修复"}], None), TurnEnd()]
     fake_cls = _fake_session_cls(
@@ -296,7 +296,7 @@ def test_spawn_subagent_unknown_type_rejected(clean_subagent_context):
 
 def test_spawn_subagent_researcher_is_readonly(clean_subagent_context, monkeypatch):
     """researcher 类型：只读工具集，无写工具；bash 保留（grep/find/cat 走 allow 直通，调研刚需）。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     roots_seen = []
 
@@ -326,7 +326,7 @@ def test_spawn_subagent_researcher_is_readonly(clean_subagent_context, monkeypat
 
 def test_spawn_subagent_max_turns_aborts(clean_subagent_context, monkeypatch):
     """硬性轮次上限：StreamStart 超过 max_turns 即 abort（优雅收尾防孤儿 tool call）。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     events = [StreamStart()] * 5 + [TurnEnd()]  # 一轮 chat 内多次 API 往返（工具循环）
     fake_cls = _fake_session_cls([{"role": "assistant", "content": "中途结论"}], events)
@@ -339,7 +339,7 @@ def test_spawn_subagent_max_turns_aborts(clean_subagent_context, monkeypatch):
 
 def test_spawn_subagent_interrupted_marks_incomplete(clean_subagent_context, monkeypatch):
     """被中断（非轮次上限）时：返回标注"被中断、未产出完整结论"，而非把半截话当结论。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     def fake_events(task, control=None):
         control.abort()  # 模拟拒绝熔断/用户中断
@@ -361,7 +361,7 @@ def test_spawn_subagent_interrupted_marks_incomplete(clean_subagent_context, mon
 
 def test_spawn_subagent_uses_context_local_history_provider(clean_subagent_context, monkeypatch):
     """子 agent 不覆盖全局 history provider；search_history 通过子 agent 上下文读取其 session messages。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     sub_messages = [{"role": "assistant", "content": "子结论"}]
 
@@ -403,7 +403,7 @@ def test_spawn_subagent_uses_context_local_history_provider(clean_subagent_conte
 
 def test_spawn_subagent_exception_still_restores_state(clean_subagent_context, monkeypatch):
     """子 agent 崩了也要恢复上下文栈 / history provider。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     class BoomSession:
         def __init__(self, tools=None, depth=0, set_provider=True):

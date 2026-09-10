@@ -9,10 +9,17 @@ import os
 
 from rich.table import Table
 
-import ui
-from agent import ChatSession, load_saved_session
-from command_registry import command
-from compact import (
+import mini_agent.ui.renderer as ui
+from mini_agent.commands.registry import command
+from mini_agent.config import (
+    SESSION_FILE,
+    SYSTEM_MESSAGES,
+    format_context_tokens,
+    get_profile,
+    list_profiles,
+)
+from mini_agent.kernel.agent import ChatSession, load_saved_session
+from mini_agent.kernel.compact import (
     apply_message_cap,
     apply_slimming,
     apply_truncation,
@@ -22,14 +29,7 @@ from compact import (
     extract_middle,
     summarize_middle,
 )
-from config import (
-    SESSION_FILE,
-    SYSTEM_MESSAGES,
-    format_context_tokens,
-    get_profile,
-    list_profiles,
-)
-from tools import clear_todo_file
+from mini_agent.tools.builtin import clear_todo_file
 
 
 def _render_rows(rows: list[tuple[str, str]]) -> None:

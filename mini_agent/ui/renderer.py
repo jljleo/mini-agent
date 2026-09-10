@@ -31,8 +31,8 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.theme import Theme
 
-from config import format_context_tokens
-from events import (
+from mini_agent.config import format_context_tokens
+from mini_agent.kernel.events import (
     Note,
     ReasoningDelta,
     StreamFinished,
@@ -44,7 +44,7 @@ from events import (
     Usage,
     Warn,
 )
-from stream_segments import StreamSegmenter
+from mini_agent.ui.segments import StreamSegmenter
 
 THEME = Theme(
     {

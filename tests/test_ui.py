@@ -1,7 +1,7 @@
 """ui.StreamRenderer 回归测试：分段落卷逻辑（长回答 Live 超高重绘重复的修复）。"""
 
-import ui
-from events import (
+import mini_agent.ui.renderer as ui
+from mini_agent.kernel.events import (
     Note,
     ReasoningDelta,
     StreamFinished,
@@ -13,7 +13,7 @@ from events import (
     Usage,
     Warn,
 )
-from ui import StreamRenderer
+from mini_agent.ui.renderer import StreamRenderer
 
 
 class DummyLive:

@@ -14,7 +14,7 @@
 
 import json
 
-from config import (
+from mini_agent.config import (
     MODEL,
     SINGLE_MSG_CAP_CHARS,
     SLIM_MIN_SAVINGS_CHARS,

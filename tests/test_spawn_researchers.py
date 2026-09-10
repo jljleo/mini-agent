@@ -9,10 +9,10 @@ import time
 
 import pytest
 
-import config
-import tools
-from events import StreamStart, TurnEnd
-from tool_registry import TOOLS
+import mini_agent.config as config
+import mini_agent.tools.builtin as tools
+from mini_agent.kernel.events import StreamStart, TurnEnd
+from mini_agent.tools.registry import TOOLS
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ def test_spawn_researchers_guided_in_system_prompt():
 
 def test_spawn_researchers_runs_multiple_tasks(clean_subagent_context, monkeypatch):
     """多个 researcher 任务并发执行，返回各自结论。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     fake_cls = _fake_session_cls({"taskA": "结论A", "taskB": "结论B"})
     monkeypatch.setattr(agent_module, "ChatSession", fake_cls)
@@ -85,7 +85,7 @@ def test_spawn_researchers_runs_multiple_tasks(clean_subagent_context, monkeypat
 
 def test_spawn_researchers_max_parallel_limits_concurrency(clean_subagent_context, monkeypatch):
     """并发上限由 config.SUBAGENT_MAX_PARALLEL 控制（不对模型暴露参数）。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     current = 0
     max_concurrent = 0
@@ -110,7 +110,7 @@ def test_spawn_researchers_max_parallel_limits_concurrency(clean_subagent_contex
 
 def test_spawn_researchers_partial_failure_returns_others(clean_subagent_context, monkeypatch):
     """一个 researcher 异常，其他正常结论仍应返回。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     class MixedSession:
         def __init__(self, tools=None, depth=0, set_provider=True):
@@ -134,7 +134,7 @@ def test_spawn_researchers_partial_failure_returns_others(clean_subagent_context
 
 def test_spawn_researchers_does_not_pollute_global_history_provider(clean_subagent_context, monkeypatch):
     """spawn_researchers 不应覆盖主 agent 的全局 history provider。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     fake_cls = _fake_session_cls()
     monkeypatch.setattr(agent_module, "ChatSession", fake_cls)
@@ -156,7 +156,7 @@ def test_spawn_researchers_nested_spawn_rejected(clean_subagent_context, monkeyp
 
 def test_spawn_researchers_read_only_policy_applies_per_thread(clean_subagent_context, monkeypatch):
     """并发 researcher 的每个线程都走 read_only 策略：非白名单命令硬拒。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     captured = []
 
@@ -182,7 +182,7 @@ def test_spawn_researchers_rejects_empty_tasks(clean_subagent_context):
 
 def test_spawn_researchers_duplicate_tasks_do_not_collapse(clean_subagent_context, monkeypatch):
     """重复的任务字符串各自独立执行、各自占位，不会因按任务名建 dict 而塌缩。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     fake_cls = _fake_session_cls()
     monkeypatch.setattr(agent_module, "ChatSession", fake_cls)
@@ -194,7 +194,7 @@ def test_spawn_researchers_duplicate_tasks_do_not_collapse(clean_subagent_contex
 
 def test_spawn_researchers_max_turns_defaults_and_limits(clean_subagent_context, monkeypatch):
     """max_turns 默认 10，可被显式设置，且钳制在 [1, 50]。"""
-    import agent as agent_module
+    import mini_agent.kernel.agent as agent_module
 
     class TurnCountingSession:
         def __init__(self, tools=None, depth=0, set_provider=True):

@@ -7,8 +7,8 @@ import subprocess
 
 import pytest
 
-import gitdiff
-from gitdiff import GitRepoError
+import mini_agent.tools.gitdiff as gitdiff
+from mini_agent.tools.gitdiff import GitRepoError
 
 
 def git(root, *args):

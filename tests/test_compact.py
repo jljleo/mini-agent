@@ -10,8 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import compact
-from compact import (
+import mini_agent.kernel.compact as compact
+from mini_agent.kernel.compact import (
     _count_chars,
     _prefix_indices,
     apply_slimming,

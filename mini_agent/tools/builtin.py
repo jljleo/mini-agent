@@ -12,9 +12,9 @@ import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import repo_map
-import ui
-from config import (
+import mini_agent.repo_map as repo_map
+import mini_agent.ui.renderer as ui
+from mini_agent.config import (
     MAX_OUTPUT_LEN,
     MAX_SUBAGENT_DEPTH,
     MAX_TIMEOUT,
@@ -23,11 +23,11 @@ from config import (
     SUBAGENT_MAX_PARALLEL,
     SUBAGENT_TYPES,
 )
-from config import (
+from mini_agent.config import (
     PROJECT_ROOT as _CONFIG_PROJECT_ROOT,
 )
-from input_utils import confirm
-from tool_registry import get_extended_tool_schemas, get_tool_schemas, tool
+from mini_agent.tools.registry import get_extended_tool_schemas, get_tool_schemas, tool
+from mini_agent.ui.input import confirm
 
 # 项目根：文件围栏 / bash cwd 的边界锚点，是模块级可变变量（不是 import 绑定）。
 # bench 通过临时改它实现隔离：`saved = PROJECT_ROOT` → 指向副本 → 用完还原。
@@ -717,8 +717,8 @@ def _run_single_subagent(task: str, agent_type: str, max_turns: int,
     }
     由 spawn_subagent / spawn_researchers 共享。
     """
-    from agent import ChatSession  # 延迟导入：避免 tools ↔ agent 循环依赖
-    from events import StreamStart, TurnControl, TurnEnd
+    from mini_agent.kernel.agent import ChatSession  # 延迟导入：避免 tools ↔ agent 循环依赖
+    from mini_agent.kernel.events import StreamStart, TurnControl, TurnEnd
 
     if depth is None:
         depth = len(_context_stack())

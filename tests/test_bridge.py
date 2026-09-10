@@ -8,8 +8,8 @@ import queue
 
 import pytest
 
-from bridge import run_in_thread
-from events import Note, TurnEnd
+from mini_agent.kernel.bridge import run_in_thread
+from mini_agent.kernel.events import Note, TurnEnd
 
 
 class TestEventDelivery:

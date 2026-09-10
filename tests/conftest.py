@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import compact  # noqa: E402
+import mini_agent.kernel.compact as compact  # noqa: E402
 
 
 class _GuardedSocket(socket.socket):
@@ -48,7 +48,7 @@ def reset_chars_per_token():
 def session(monkeypatch, tmp_path):
     """隔离的 ChatSession：假 API key（构造 client 用，不发请求）、存档指向 tmp。"""
     monkeypatch.setenv("MOONSHOT_API_KEY", "test-key")
-    import agent
+    import mini_agent.kernel.agent as agent
     monkeypatch.setattr(agent, "SESSION_FILE", str(tmp_path / "session.json"))
     return agent.ChatSession()
 
@@ -56,7 +56,7 @@ def session(monkeypatch, tmp_path):
 @pytest.fixture
 def small_context_profile(monkeypatch):
     """注册一个 64K 窗口的测试用 Kimi 档案，用于触发截断/百分比等边界测试。"""
-    import config
+    import mini_agent.config as config
     profile = {
         "model": "kimi-test-64k",
         "base_url": "https://api.moonshot.cn/v1",

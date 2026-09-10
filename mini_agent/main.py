@@ -1,6 +1,6 @@
 """CLI 入口：单一主循环，业务逻辑下沉到 agent / input_utils / ui / bridge。
 
-运行：python main.py
+运行：python -m mini_agent（pipx 安装后：mini-agent）
 退出：exit / quit / :q / /quit / Ctrl+C / Ctrl+D（运行中单击 Ctrl+C = 优雅打断本轮）
 
 tty 与管道共用 `_chat_loop`，差别全部下沉到 read_input / ui 内部自适应：
@@ -14,14 +14,14 @@ tty 与管道共用 `_chat_loop`，差别全部下沉到 read_input / ui 内部�
 
 import sys
 
-import commands  # noqa: F401  集中式注册：导入即触发 @command 注册
-import tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
-import ui
-from agent import ChatSession
-from bridge import run_in_thread
-from command_registry import COMMANDS
-from config import CONTEXT_TOKENS, MODEL, PROJECT_ROOT, QUIT_COMMANDS
-from input_utils import read_input, set_status_provider
+import mini_agent.commands.builtin as commands  # noqa: F401  集中式注册：导入即触发 @command 注册
+import mini_agent.tools.builtin as tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
+import mini_agent.ui.renderer as ui
+from mini_agent.commands.registry import COMMANDS
+from mini_agent.config import CONTEXT_TOKENS, MODEL, PROJECT_ROOT, QUIT_COMMANDS
+from mini_agent.kernel.agent import ChatSession
+from mini_agent.kernel.bridge import run_in_thread
+from mini_agent.ui.input import read_input, set_status_provider
 
 
 def _dispatch_command(session: ChatSession, question: str, forced: bool):

@@ -7,7 +7,7 @@ handler 签名统一为 (session, args)；无参数命令忽略 args 即可。
 没有导入，COMMANDS 永远是空表。
 """
 
-import ui
+import mini_agent.ui.renderer as ui
 
 COMMANDS: dict = {}
 
