@@ -31,7 +31,7 @@ mini-agent = "main:main"
 [tool.hatch.build.targets.wheel]
 only-include = [
     "agent.py", "bridge.py", "command_registry.py", "commands.py", "compact.py",
-    "config.py", "events.py", "input_utils.py", "judge.py", "main.py",
+    "config.py", "events.py", "gitdiff.py", "input_utils.py", "judge.py", "main.py",
     "repo_map.py", "stream_segments.py", "streaming.py", "tool_registry.py",
     "tools.py", "trace.py", "ui.py",
     "models.default.json",
@@ -52,4 +52,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent", "bench", "command_registry", "commands", "compact", "config", "events", "input_utils", "judge", "streaming", "tool_registry", "tools", "trace", "tui", "tui_render", "ui"]
+known-first-party = ["agent", "bench", "command_registry", "commands", "compact", "config", "events", "gitdiff", "input_utils", "judge", "streaming", "tool_registry", "tools", "trace", "ui"]
