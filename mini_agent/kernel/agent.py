@@ -55,6 +55,7 @@ from mini_agent.kernel.events import (
 )
 from mini_agent.kernel.streaming import interruptible_stream, stream_and_assemble
 from mini_agent.repo_map import build_repo_map_cached
+from mini_agent.skills import format_skills_index, scan_skills
 from mini_agent.tools.builtin import set_history_provider
 from mini_agent.tools.registry import TOOLS, get_extended_tool_schemas, get_resident_tool_schemas
 
@@ -109,6 +110,15 @@ class ChatSession:
             self.messages.append(
                 {"role": "system", "content": f"{_AGENTS_MD_HEADER}\n{agents_md}"}
             )
+        # skills 索引注入（与 AGENTS.md/repo map 同一边界：失败静默、随会话保留、
+        # compact 头部保留区覆盖）。索引常驻、正文惰性（read_file 按需加载）——
+        # 与 search_tools 两档制同构，是项目约定/审查标准等程序性知识的载体
+        try:
+            skills_text = format_skills_index(scan_skills(config.PROJECT_ROOT))
+            if skills_text:
+                self.messages.append({"role": "system", "content": skills_text})
+        except Exception:
+            pass
         # 代码库地图注入：项目结构/核心符号一览（aider 式）。作为一条 system 消息
         # 追加在模板后——compact 的头部保留区会保留它，不会被截断。生成失败静默
         # 跳过（地图是增强，不是依赖）；模块级缓存避免每个会话重复扫描。
