@@ -9,19 +9,24 @@ import sys
 
 from dotenv import load_dotenv
 
-load_dotenv()  # 把 .env 加载进环境变量，API key 不落代码
-
 # --- 项目路径 ---
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+# 工作对象根：启动时所在的项目目录（cwd）。agent 操作的是「用户项目」而不是
+# mini-agent 自己的源码目录——pipx 安装后两者分离，按 __file__ 定位会指向
+# site-packages。bench/测试通过 monkeypatch（tools.PROJECT_ROOT）替换到沙箱。
+PROJECT_ROOT = os.getcwd()
+# .env 两处查找：默认向上查找（仓库开发场景，config.py 在仓库根）+
+# cwd（pipx 场景的唯一可靠位置——用户项目的 .env）
+load_dotenv()
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 HISTORY_FILE = os.path.join(PROJECT_ROOT, ".chat_history")  # prompt_toolkit 历史（跨会话）
 SESSION_FILE = os.path.join(PROJECT_ROOT, ".session.json")  # 会话存档（/resume 恢复用）
 
 # --- 模型（多模型档案）---
-# 所有 Kimi 模型档案都在 JSON 文件里配置：
-#   - models.default.json：仓库内置默认档案（可提交）
-#   - models.json：用户本地覆盖/新增档案（gitignored）
+#   - models.default.json：内置默认档案，按 config.py 的 __file__ 定位（仓库根或
+#     site-packages）——不随 PROJECT_ROOT(cwd) 走，pipx 打包时随模块装入 wheel
+#   - models.json：用户本地覆盖/新增档案（cwd，gitignored）
 # 格式：顶层对象，键为档案名，值为 {"model", "base_url", "api_key_env", "context_tokens"}。
-_DEFAULT_MODELS_JSON = os.path.join(PROJECT_ROOT, "models.default.json")
+_DEFAULT_MODELS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models.default.json")
 _USER_MODELS_JSON = os.path.join(PROJECT_ROOT, "models.json")
 
 

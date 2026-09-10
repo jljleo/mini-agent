@@ -11,3 +11,7 @@ bench/results/
 ROADMAP.md
 AGENT_DESIGN.md
 DESIGN_NOTES.md
+
+# 打包构建产物
+build/
+*.egg-info/

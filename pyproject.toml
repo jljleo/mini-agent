@@ -1,4 +1,41 @@
-# 工具配置（依赖仍由 requirements.txt 管理，本文件不放项目元数据）
+# 分发元数据（pipx install .）：扁平模块项目，hatchling 按显式清单装入 wheel
+# （含 models.default.json——config.py 按 __file__ 定位它，必须与模块同目录）。
+# 依赖列表与 requirements.txt 保持同步（dev 流程仍走 requirements.txt）。
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mini-agent"
+version = "0.1.0"
+description = "一个扁平的 Python CLI coding agent：上下文压缩、类型化子 agent、权限裁决、benchmark 评测"
+requires-python = ">=3.13"
+dependencies = [
+    "openai>=1.0",
+    "python-dotenv>=1.0",
+    "prompt_toolkit>=3.0",
+    "rich>=13.0",
+    "tree-sitter>=0.26",
+    "tree-sitter-python>=0.25",
+    "tree-sitter-javascript>=0.25",
+    "tree-sitter-typescript>=0.23",
+    "tree-sitter-go>=0.25",
+    "tree-sitter-rust>=0.24",
+    "tree-sitter-java>=0.23",
+]
+
+[project.scripts]
+mini-agent = "main:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = [
+    "agent.py", "bridge.py", "command_registry.py", "commands.py", "compact.py",
+    "config.py", "events.py", "input_utils.py", "judge.py", "main.py",
+    "repo_map.py", "stream_segments.py", "streaming.py", "tool_registry.py",
+    "tools.py", "trace.py", "ui.py",
+    "models.default.json",
+]
 
 [tool.ruff]
 target-version = "py313"

@@ -306,9 +306,18 @@ def edit_file(path: str, old: str, new: str) -> str:
     return result
 
 
-# 权限规则：permissions.json 是唯一事实来源（原 SAFE_PREFIXES 已迁入）。
+# 权限规则：cwd 的 permissions.json 优先，缺省用内置默认（pipx 在任意项目运行的兑底）。
 # 评估语义：deny 优先于 allow 优先于默认 ask——最保守的匹配获胜。
 # 每条命令实时读文件：改规则无需重启（热加载），文件小，开销可忽略。
+
+# 内置默认规则：cwd 无 permissions.json 时的安全底线。项目级文件存在时整体替代
+# （而非合并）——规则表每项目一份，事实来源唯一，不猜「合并后谁赢」。
+_DEFAULT_RULES: list[dict] = [
+    {"pattern": "rm -rf", "action": "deny", "note": "递归删除永不放行"},
+    {"pattern": "^(ls|pwd|cat|echo|grep|find|head|tail|wc|date)(\\s|$)", "action": "allow",
+     "note": "只读基础命令（词边界防 lsof 类误匹配）"},
+    {"pattern": "^git (status|log|diff|show|branch)(\\s|$)", "action": "allow", "note": "只读 git 命令"},
+]
 
 # 危险命令关键词：即使在确认环节也用红色高亮提醒（黑名单仅作提示，不能替代人工审查）
 DANGEROUS_PATTERNS = [
@@ -371,10 +380,10 @@ def _record_subagent_denial(reason: str) -> str:
 
 
 def _load_rules() -> list[dict]:
-    """加载 permissions.json 的规则表；文件缺失或损坏按空表处理（绝不拖垮 bash）。"""
+    """加载权限规则表：cwd 的 permissions.json 优先；缺失用内置默认；损坏按空表处理（全 ask，绝不拖垮 bash）。"""
     rules_path = os.path.join(PROJECT_ROOT, "permissions.json")
     if not os.path.exists(rules_path):
-        return []
+        return list(_DEFAULT_RULES)
     try:
         with open(rules_path, encoding="utf-8") as f:
             return json.load(f).get("rules", [])

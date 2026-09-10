@@ -205,9 +205,10 @@ class TestPermission:
         monkeypatch.setattr(tools, "PROJECT_ROOT", str(tmp_path))
         assert tools._load_rules() == []
 
-    def test_missing_rules_file_is_empty(self, tmp_path, monkeypatch):
+    def test_missing_rules_file_uses_builtin_defaults(self, tmp_path, monkeypatch):
+        """cwd 无 permissions.json（pipx 在任意项目运行）：回落内置默认规则。"""
         monkeypatch.setattr(tools, "PROJECT_ROOT", str(tmp_path))
-        assert tools._load_rules() == []
+        assert tools._load_rules() == tools._DEFAULT_RULES
 
 
 # ============ 越界路径检测 ============
