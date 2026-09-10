@@ -110,7 +110,7 @@ def banner(model: str, cwd: str, context_tokens: int | None = None) -> None:
             f"[bold accent]✦ mini-agent[/]\n\n"
             f"[muted]模型[/]  {escape(model)}{ctx}\n"
             f"[muted]目录[/]  {escape(cwd)}\n\n"
-            f"[faint]输入问题开始对话 · /help 查看命令 · exit / Ctrl+C 退出[/]",
+            f"[faint]输入问题开始对话 · 输入 / 查看命令 · exit / Ctrl+C 退出[/]",
             border_style="faint",
             padding=(0, 2),
         )
