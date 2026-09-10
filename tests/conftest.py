@@ -39,6 +39,18 @@ def _no_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fake_api_keys(monkeypatch):
+    """测试不依赖真实 .env：所有档案的 key 设假值（dotenv 不覆盖已存在变量）。
+
+    CI/干净机器没有 .env，ChatSession._init_client 缺 key 会 RuntimeError——
+    本地全绿纯属 load_dotenv 把真 key 装进了环境变量（2026-09-10 CI 抓出：
+    移走 .env 后 5 failed + 33 errors）。
+    """
+    monkeypatch.setenv("MOONSHOT_API_KEY", "test-key")
+    monkeypatch.setenv("KIMI_CODE_API_KEY", "test-key")
+
+
+@pytest.fixture(autouse=True)
 def reset_chars_per_token():
     compact._chars_per_token = 2.0
     yield
