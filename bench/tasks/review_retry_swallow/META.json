@@ -15,5 +15,31 @@
       ],
       "description": "重试耗尽后静默返回 None 而非抛 FetchError：调用方无法区分失败与正常返回 None"
     }
+  ],
+  "neutral": [
+    {
+      "path": "fetcher.py",
+      "lines": [
+        6,
+        7
+      ],
+      "reason": "FetchError 变死代码（注入 bug 的派生观察）"
+    },
+    {
+      "path": "fetcher.py",
+      "lines": [
+        11,
+        11
+      ],
+      "reason": "docstring 未同步新行为（派生观察）"
+    },
+    {
+      "path": "fetcher.py",
+      "lines": [
+        12,
+        17
+      ],
+      "reason": "last_error 死赋值（派生观察）"
+    }
   ]
 }

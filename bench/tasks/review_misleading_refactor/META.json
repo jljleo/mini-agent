@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "falsy-trap",
+      "path": "config_loader.py",
+      "description": "`or 30` 把合法的 0（不超时）静默改为 30：falsy 陷阱，语义被破坏",
+      "lines": [
+        6,
+        6
+      ]
+    }
+  ],
+  "neutral": [
+    {
+      "path": "config_loader.py",
+      "lines": [
+        13,
+        18
+      ],
+      "reason": "get_retries 同构但未被本次变更修改，报它不算命中也不算误报"
+    }
+  ]
+}

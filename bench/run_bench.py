@@ -227,7 +227,7 @@ def run_review_task(task_dir: Path, meta: dict) -> dict:
         repo_map._IGNORED_ROOT = saved_repo_root
 
     findings_dicts = [f.__dict__ for f in findings]
-    scoring = score_review(findings_dicts, meta.get("bugs", []))
+    scoring = score_review(findings_dicts, meta.get("bugs", []), neutral=meta.get("neutral", []))
     return {
         "task": task_dir.name,
         **scoring,

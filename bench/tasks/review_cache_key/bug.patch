@@ -1,0 +1,42 @@
+diff --git a/cli.py b/cli.py
+index c229be6..c674601 100644
+--- a/cli.py
++++ b/cli.py
+@@ -10,3 +10,5 @@ def main() -> None:
+     store.add(Product(id=2, name="鼠标", price_cents=9900))
+     product = store.get_by_id(1)
+     print(product.name if product else "未找到")
++    again = store.get_by_id(1)
++    print(f"缓存命中: {again is product}")
+diff --git a/store.py b/store.py
+index a1fb1c5..13a34ad 100644
+--- a/store.py
++++ b/store.py
+@@ -4,13 +4,25 @@ from models import Product
+ 
+ 
+ class Store:
+-    """内存库存：按 id 索引。"""
++    """内存库存：按 id 索引，带查询缓存。"""
+ 
+     def __init__(self) -> None:
+         self._by_id: dict[int, Product] = {}
++        self._cache: dict[str, Product] = {}
+ 
+     def add(self, product: Product) -> None:
+         self._by_id[product.id] = product
++        self._cache[product.name] = product
+ 
+     def get_by_id(self, product_id: int) -> Product | None:
+-        return self._by_id.get(product_id)
++        key = self._cache_key(product_id)
++        if key in self._cache:
++            return self._cache[key]
++        product = self._by_id.get(product_id)
++        if product is not None:
++            self._cache[key] = product
++        return product
++
++    def _cache_key(self, product_id: int) -> str:
++        product = self._by_id.get(product_id)
++        return product.name if product else str(product_id)

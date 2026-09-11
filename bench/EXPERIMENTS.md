@@ -386,3 +386,40 @@ review_missing_guard，base/ + bug.patch + META ground truth 行区间）；
 
 **可复现**：`.venv/bin/python bench/run_bench.py review_off_by_one`（任务级幂等，
 base/ + bug.patch 确定性重建沙箱）。
+
+---
+
+## 16. Review 评测深化：难任务 + 误报语义修正（【E9】）
+
+**动机**：E8 基线在简单任务上 3/3 触顶，需要区分度；同时修正 E8 暴露的
+「派生正确 finding 被误记 FP」的指标缺陷。
+
+**设施**：新增 3 个 hard 任务（review_multi_bug 双 bug / review_misleading_refactor
+falsy 陷阱伪装成简化 / review_cache_key 三文件特性提交藏缓存 key 错位）；
+判分升级：bug 支持 aliases（可接受定位）、META 顶层 neutral 区间（派生观察
+不算检出也不算误报）、同 bug 区域多条 finding 记冗余不算误报。
+
+**数据**（k3，单样本/任务）：
+
+| 任务 | recall | precision | 备注 |
+|---|---|---|---|
+| review_retry_swallow（+neutral） | 1.0 | 1.0 | neutral=1（死代码观察正确归类） |
+| review_multi_bug | 1.0 | 1.0 | 双 bug 双检出 |
+| review_misleading_refactor | 1.0 | 1.0 | falsy 陷阱被识破 |
+| review_cache_key 首跑 | 1.0→（升级后 0.5） | 0.5→1.0 | 见副产品 2 |
+| review_cache_key 复跑 | 0.5 | 0.5→（同区冗余修正后 1.0） | 见结论 3 |
+
+**结论（诚实边界：单样本、合成任务、作者知答案）**：
+1. **合成任务区分度已触顶**：k3 对单/双 bug、伪装重构、跨文件藏匿全部检出。
+   再上难度只能靠真实仓库回测（历史 bug-fix commit），这是下一批任务的方向。
+2. **副产品 1（ground truth 修正循环）**：review_cache_key 首跑的「误报」实为
+   注入代码里我没意识到的真缺陷（add 按 name 写缓存，改名重 add 留孤儿条目）——
+   模型发现了 ground truth 之外的真 bug。处置：升级为第二个 ground truth 条目。
+   「评测修正指标」之后，「评测修正 ground truth」——这条循环的纯度超预期。
+3. **副产品 2（方差）**：同一任务两跑产出不同 findings（首跑抓到孤儿条目、
+   复跑漏它但发现数字名键冲突）。单样本 review 结论噪音大，任何旋钮调优的
+   结论都必须多样本（与 E7 的跨日漂移教训同构）。
+4. 已知可钻空子（留档）：同区刷屏不算 FP——模型若在同一 bug 区域堆 finding 可
+   虚高 precision。真出现再收紧。
+
+**可复现**：`.venv/bin/python bench/run_bench.py review_cache_key`（注意单样本方差）。

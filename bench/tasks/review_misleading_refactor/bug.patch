@@ -1,0 +1,16 @@
+diff --git a/config_loader.py b/config_loader.py
+index f71c631..78985f5 100644
+--- a/config_loader.py
++++ b/config_loader.py
+@@ -3,10 +3,7 @@
+ 
+ def get_timeout(config: dict) -> int:
+     """超时秒数：0 表示不超时（合法配置），缺省 30。"""
+-    value = config.get("timeout")
+-    if value is None:
+-        return 30
+-    return value
++    return config.get("timeout") or 30
+ 
+ 
+ def get_retries(config: dict) -> int:

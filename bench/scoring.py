@@ -43,22 +43,36 @@ def _path_match(finding_path: str, bug_path: str) -> bool:
     return norm == bug_path or norm.endswith("/" + bug_path)
 
 
-def score_review(findings: list[dict], bugs: list[dict], line_tolerance: int = 3) -> dict:
+def _in_zone(path: str, line: int, zone: dict, line_tolerance: int) -> bool:
+    lo, hi = zone["lines"]
+    return _path_match(path, zone["path"]) and lo - line_tolerance <= line <= hi + line_tolerance
+
+
+def score_review(findings: list[dict], bugs: list[dict], line_tolerance: int = 3,
+                 neutral: list[dict] | None = None) -> dict:
     """review 任务判分（纯函数）：findings 对照 ground truth bugs。
 
     命中 = 路径匹配且行号落在 bug 行区间 ±line_tolerance（模型定位允许小偏差）；
     同一 finding 最多命中一个 bug（先匹配先得）。
-    返回 score=recall（主指标），precision/hits/missed 供分析。
+
+    bug 可带 aliases：同一 bug 的其它可接受定位（如缓存 key 定义处 vs 使用处）。
+    neutral（顶层传入）：有效但非 ground truth 的区间——命中 neutral 的 finding
+    既不算检出也不算误报（E8 教训：docstring 未同步/死代码这类派生观察是 review 的
+    正当产出，precision 不该惩罚它；但它是 bug 的影子，也不该记检出）。
+
+    返回 score=recall（主指标），precision=命中/(命中+真误报)（neutral 不进分母）。
     """
+    neutral = neutral or []
     used: set[int] = set()
+    neutral_count = 0
     hits, missed = [], []
     for bug in bugs:
-        lo, hi = bug["lines"]
+        zones = [bug, *bug.get("aliases", [])]
         hit_idx = None
         for i, f in enumerate(findings):
-            if i in used or not _path_match(f["path"], bug["path"]):
+            if i in used:
                 continue
-            if lo - line_tolerance <= f["line"] <= hi + line_tolerance:
+            if any(_in_zone(f["path"], f["line"], z, line_tolerance) for z in zones):
                 hit_idx = i
                 break
         if hit_idx is None:
@@ -66,9 +80,21 @@ def score_review(findings: list[dict], bugs: list[dict], line_tolerance: int = 3
         else:
             used.add(hit_idx)
             hits.append(bug["id"])
-    false_positives = [f for i, f in enumerate(findings) if i not in used]
+    bug_zones = [z for bug in bugs for z in [bug, *bug.get("aliases", [])]]
+    false_positives = []
+    for i, f in enumerate(findings):
+        if i in used:
+            continue
+        # 落在任一 bug 区间（含已被其他 finding 命中的）或 neutral 区间的 finding
+        # 不算误报：指向的位置确实有注入缺陷——同区多条至多是冗余，不是错误
+        # （已知可被「在同一区域刷屏」钻空子，模型真开始刷时再收紧，E9 留档）
+        if any(_in_zone(f["path"], f["line"], z, line_tolerance) for z in bug_zones + neutral):
+            neutral_count += 1
+        else:
+            false_positives.append(f)
     recall = len(hits) / len(bugs) if bugs else 1.0
-    precision = (len(findings) - len(false_positives)) / len(findings) if findings else 1.0
+    scored = len(findings) - neutral_count
+    precision = len(hits) / scored if scored else 1.0
     return {
         "score": recall,
         "passed": recall >= 0.5,
@@ -78,8 +104,8 @@ def score_review(findings: list[dict], bugs: list[dict], line_tolerance: int = 3
         "hits": hits,
         "missed": missed,
         "false_positives": len(false_positives),
+        "neutral": neutral_count,
     }
-
 
 def build_summary(records: list[dict], version: int) -> dict:
     """把任务结果记录汇总成 summary：每任务分数 + 聚合指标。"""

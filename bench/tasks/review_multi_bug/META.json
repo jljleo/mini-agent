@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "threshold-boundary",
+      "path": "pricing.py",
+      "description": ">= 改成 >：恰好等于阈值时满减不生效，与 docstring 矛盾",
+      "lines": [
+        6,
+        6
+      ]
+    },
+    {
+      "id": "float-division",
+      "path": "pricing.py",
+      "description": "// 改成 /：返回 float 破坏「分」的整数契约（金额浮点精度风险）",
+      "lines": [
+        13,
+        13
+      ]
+    }
+  ]
+}

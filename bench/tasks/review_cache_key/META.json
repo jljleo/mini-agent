@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "cache-key-collision",
+      "path": "store.py",
+      "aliases": [
+        {
+          "path": "store.py",
+          "lines": [
+            18,
+            18
+          ]
+        }
+      ],
+      "description": "缓存 key 用商品名而非 id：同名商品互相覆盖，get_by_id 可能返回错商品",
+      "lines": [
+        28,
+        28
+      ]
+    },
+    {
+      "id": "cache-orphan-on-rename",
+      "path": "store.py",
+      "lines": [
+        15,
+        15
+      ],
+      "description": "add 按 name 写缓存：同 id 改名重 add 后旧 name 缓存成孤儿条目（脏读+内存只增）——E9 首跑由模型发现，原为「误报」，实为真缺陷，升级为 ground truth"
+    }
+  ]
+}
