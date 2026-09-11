@@ -630,3 +630,29 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
 - 副产品 2（成本观察）：kimi-for-coding 单任务 13-23K tokens、2-3 倍于 k3
   耗时——高成本模型不适合做主力评测扫荡，适合做「终审复核」档。
 - 可复现：上面两条命令（--model=kimi-for-coding）。
+
+---
+
+### 【E12.7】2026-09-11 加深第一炮收官：跨文件协议错位（session_ttl_scale）也被打穿，合成注入面到顶
+
+- 动机：E12.5/E12.6 指「区分度需加深：跨文件状态」。设计「单文件内不可判定的
+  真 bug」——auth_check 的 ×60 单位换算，不读 auth_issue 的 docstring 无法定罪；
+  配第二 bug clamp 上限用 max（docstring 对照，语义完全相反）。验证跨文件
+  是否砸穿 recall。
+- 控制变量：k3（基线模型）、n=1、single；与 E12.5 同底座（base→bug.patch 双文件）。
+- 设施：`bench/run_bench.py review_session_ttl_scale`。
+- 数据：recall=1.0 precision=1.0 FP=0 · 12,986 tokens · 31.7s。两条 high 全命中，
+  且 findings 原文引用了跨文件证据（「与注释 clamp 上限」...「auth_issue.py 的
+  docstr[ing]」）——模型确实执行了跨文件对照，不是蒙的。
+- 结论：
+  1. **跨文件协议错位同样打不穿**：k3 在 ~13K tokens 内完成跨文件归因并给出
+     证据链。合成注入面（单体 bug → 二次推理 → multi-bug+诱饵 → 跨文件）至此
+     全部饱和，**合成任务路线到顶（MPV 耗尽）**——继续铺同构合成任务的边际
+     收益趋零。
+  2. 区分度的三条出路（按成本排序）：(a) 大仓库真实注入（chrono 52K tokens 已
+     验证成本量级，但「大仓库+深埋点」的组合尚未测）；(b) 弱模型验证（换
+     cheaper 模型让浅任务显露出区分度，反向利用天花板）；(c) n≥3 方差控制
+     （不是找区分度，是还 R2 的方法论欠账）。
+- 副产品：无新机制缺陷（zones 排布按 E12.5 准则跨文件分区，静态检查通过；
+  上一轮的教训直接内化，这轮没再犯）。
+- 可复现：`bench/run_bench.py review_session_ttl_scale`。

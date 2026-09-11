@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "ttl-scale-cross-file",
+      "path": "auth_check.py",
+      "lines": [
+        6,
+        6
+      ],
+      "description": "is_fresh 把 session_ttl 当分钟换算（×60）：单看本文件无法定罪（×60 可能是刻意分钟换算），必须读 auth_issue.py 的 issue_session docstring「session_ttl 单位：秒」才确认——会话有效期被放大 60 倍的跨文件协议错位"
+    },
+    {
+      "id": "clamp-max-not-min",
+      "path": "auth_issue.py",
+      "lines": [
+        9,
+        9
+      ],
+      "description": "docstring 声明「clamp 上限（不超过 1 小时）」，实现用 max()：短会话（如 5 分钟）被抬到 1 小时——clamp 上限变成保底下限，语义完全相反"
+    }
+  ]
+}
