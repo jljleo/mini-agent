@@ -159,6 +159,15 @@ def format_tokens(n: int) -> str:
 # 此次数即判定死循环，强制结束本轮。正常任务每次调用参数不同，不会误伤。
 MAX_SAME_TOOL_CALLS = 3
 
+# --- 写后验证闭环（R0 未勾项，2026-09-11 落地） ---
+# edit_file / write_file 改完文件后自动执行的校验命令模板列表（顺序执行，首个失败
+# 即停，stderr 带行号回餵工具结果——模型下一轮看到自己改坏的东西当场自愈）。
+# {path} 替换为改动文件的项目相对路径。默认空 = 仅保留 tree-sitter 语法自检
+# （零回归、零额外开销）；配置示例：
+#   POST_WRITE_CHECK_COMMANDS = ["ruff check {path}", "python -m py_compile {path}"]
+# 校验失败不算工具失败（不抛异常）：验证信号优于执行结果（AGENT_DESIGN 49 条）。
+POST_WRITE_CHECK_COMMANDS: list[str] = []
+
 # --- 输出/上下文保护 ---
 MAX_OUTPUT_LEN = 10_000  # 工具结果 / 命令输出的截断阈值：防大输出灌爆上下文
 TOOL_RESULT_PREVIEW_LEN = 100  # 终端里工具结果的预览长度

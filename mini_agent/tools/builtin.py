@@ -18,6 +18,7 @@ from mini_agent.config import (
     MAX_OUTPUT_LEN,
     MAX_SUBAGENT_DEPTH,
     MAX_TIMEOUT,
+    POST_WRITE_CHECK_COMMANDS,
     SUBAGENT_DENIAL_LIMIT,
     SUBAGENT_HIDDEN_TOOLS,
     SUBAGENT_MAX_PARALLEL,
@@ -194,7 +195,40 @@ def write_file(path: str, content: str) -> str:
     os.makedirs(os.path.dirname(full), exist_ok=True)
     with open(full, "w", encoding="utf-8") as f:
         f.write(content)
-    return f"Content written to {path}"
+    result = f"Content written to {path}"
+    result += _run_post_write_checks(full)
+    return result
+
+
+def _run_post_write_checks(path: str) -> str:
+    """写后验证闭环：edit/write 改完后跑 config.POST_WRITE_CHECK_COMMANDS。
+
+    命令模板以 {path} 替换为改动文件的项目相对路径，在 PROJECT_ROOT 下顺序执行；
+    首个失败即停，stderr 前几行带 ⚠ 回餵工具结果（模型下一轮自愈）。
+    校验失败不是工具失败（返回附加文本而非抛异常）——验证信号优于执行结果。
+    默认空列表：行为与纯语法自检一致（零回归）。
+    """
+    if not POST_WRITE_CHECK_COMMANDS:
+        return ""
+    try:
+        rel = os.path.relpath(path, PROJECT_ROOT)
+    except ValueError:  # Windows 跨盘符等不可相对化
+        rel = path
+    for template in POST_WRITE_CHECK_COMMANDS:
+        cmd = template.replace("{path}", rel)
+        try:
+            proc = subprocess.run(
+                cmd, shell=True, cwd=PROJECT_ROOT,
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"\n⚠ 校验命令执行异常（{cmd}）: {e}"
+        if proc.returncode != 0:
+            body = proc.stderr.strip() or proc.stdout.strip() or "（无输出）"
+            head = "\n".join(body.splitlines()[:15])
+            return (f"\n⚠ 校验失败（{cmd} → exit {proc.returncode}）:"
+                    f"\n{head}\n请修复后再继续。")
+    return ""
 
 
 def _lenient_replace(content: str, old: str, new: str, path: str, preview: str) -> str | None:
@@ -303,6 +337,7 @@ def edit_file(path: str, old: str, new: str) -> str:
     if diags:
         result += ("\n⚠ 语法检查失败（先修复再继续，避免带着错误前行）:\n"
                    + "\n".join(diags[:5]))
+    result += _run_post_write_checks(full)
     return result
 
 
