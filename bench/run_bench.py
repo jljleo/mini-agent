@@ -185,6 +185,9 @@ def apply_edit_mode(mode: str) -> None:
 
 EDIT_MODE: str = "lenient"
 
+# review 通道模式：single（基线）/ parallel（E11 实验组），--review-mode= 切换
+REVIEW_MODE: str = "single"
+
 
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
@@ -233,10 +236,10 @@ def run_review_task(task_dir: Path, meta: dict) -> dict:
     tools.PROJECT_ROOT = str(sandbox)
     tools.confirm = lambda *args, **kwargs: True
     repo_map._IGNORED_ROOT = str(sandbox)
-    session = None
+    sessions = []
     try:
-        raw, findings, session = review_pipeline.run_review(
-            meta.get("spec", "HEAD"), root=str(sandbox))
+        raw, findings, sessions = review_pipeline.run_review(
+            meta.get("spec", "HEAD"), root=str(sandbox), mode=REVIEW_MODE)
     except Exception as e:
         print(f"[bench] review 异常中断: {type(e).__name__}: {e}", file=sys.stderr)
         raw, findings = "", []
@@ -252,9 +255,10 @@ def run_review_task(task_dir: Path, meta: dict) -> dict:
         **scoring,
         "findings": findings_dicts,
         "raw": raw,
-        "prompt_tokens": session.total_prompt_tokens if session else 0,
-        "completion_tokens": session.total_completion_tokens if session else 0,
+        "prompt_tokens": sum(s.total_prompt_tokens for s in sessions),
+        "completion_tokens": sum(s.total_completion_tokens for s in sessions),
         "sandbox": str(sandbox),
+        "review_mode": REVIEW_MODE,
         "messages": [],  # review 会话是只读短流程，不落消息体（结果文件体积控制）
     }
 
@@ -308,6 +312,11 @@ def main() -> None:
                       if a.startswith("--edit-mode=")), "lenient")
     if edit_mode not in ("lenient", "strict"):
         sys.exit(f"--edit-mode= 取值 lenient|strict，收到: {edit_mode}")
+    global REVIEW_MODE
+    REVIEW_MODE = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                        if a.startswith("--review-mode=")), "single")
+    if REVIEW_MODE not in ("single", "parallel"):
+        sys.exit(f"--review-mode= 取值 single|parallel，收到: {REVIEW_MODE}")
 
     apply_group(group)
     apply_model(model)

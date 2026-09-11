@@ -139,9 +139,10 @@ def run_review(spec: str | None = None, *, root: str | None = None,
 
 
 def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = True,
-           root: str | None = None) -> int:
+           max_findings: int = 0, root: str | None = None) -> int:
     """CLI 壳：跑一轮 review，返回 exit code（默认 high findings → 1，CI 门禁语义）。"""
     raw, findings, session = run_review(spec, root=root, render=(fmt == "text"))
+    findings = cap_findings(findings, max_findings)
     if session is None:
         print("无变更，跳过 review")
         return 0
@@ -172,9 +173,19 @@ def cli(argv: list[str]) -> int:
                         help="json 时 stdout 只出结构化结果（CI/评测消费）")
     parser.add_argument("--no-fail", action="store_true",
                         help="有 high findings 也返回 0（关闭门禁语义）")
+    parser.add_argument("--max-findings", type=int, default=0,
+                        help="最多输出多少条 findings（0 = 不限制）")
     args = parser.parse_args(argv)
     try:
-        return review(args.spec, fmt=args.format, fail_on_high=not args.no_fail)
+        return review(args.spec, fmt=args.format, fail_on_high=not args.no_fail,
+                      max_findings=args.max_findings)
     except gitdiff.GitRepoError as e:
         print(f"✗ {e}", file=sys.stderr)
         return 2
+
+
+def cap_findings(findings: list[Finding], limit: int) -> list[Finding]:
+    """限制 findings 输出条数（0 = 不限制）。"""
+    if limit <= 0:
+        return findings
+    return findings[:limit - 1]

@@ -119,3 +119,39 @@ class TestRoundFuse:
         out = list(review._round_fuse(iter(self._events(review.HARD_CAP_ROUNDS + 5)), control))
         assert control.interrupt.is_set()
         assert len(out) < 2 * (review.HARD_CAP_ROUNDS + 5)  # 流被截断
+
+
+class TestParallelMode:
+    """parallel 模式：两轴独立会话 + Python 确定性合并（E11 实验组）。"""
+
+    def test_merge_dedupes_by_path_line_keeps_higher_severity(self):
+        a = [review.Finding("low", "x.py", 10, "轴A的描述")]
+        b = [review.Finding("high", "x.py", 10, "轴B的同位置报告"),
+             review.Finding("medium", "y.py", 3, "独有发现")]
+        merged = review._merge_findings([a, b])
+        assert len(merged) == 2
+        spot = next(f for f in merged if f.path == "x.py")
+        assert spot.severity == "high" and spot.description == "轴B的同位置报告"
+        # severity 排序：high 在前
+        assert merged[0].severity == "high"
+
+    def test_parallel_dispatches_two_axes_and_merges(self, monkeypatch):
+        monkeypatch.setattr(review.gitdiff, "collect", lambda spec, root=None: "diff")
+        calls = {}
+
+        class FakeSession:
+            total_prompt_tokens = total_completion_tokens = 1
+            messages = []
+
+        def fake_run_one(prompt, render):
+            axis = "correctness" if "【正确性】" in prompt else "standards"
+            calls[axis] = True
+            text = "- [high] a.py:1 — 轴发现" if axis == "correctness" else "无 findings"
+            return text, FakeSession()
+
+        monkeypatch.setattr(review, "_run_one", fake_run_one)
+        raw, findings, sessions = review.run_review("HEAD", mode="parallel")
+        assert calls == {"correctness": True, "standards": True}
+        assert len(sessions) == 2
+        assert len(findings) == 1 and findings[0].path == "a.py"
+        assert "【correctness 轴】" in raw and "【standards 轴】" in raw
