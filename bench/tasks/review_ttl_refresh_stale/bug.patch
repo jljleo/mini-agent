@@ -1,8 +1,8 @@
 diff --git a/cache.py b/cache.py
-index c2e19c4..72111ce 100644
+index c2e19c4..6bfbc53 100644
 --- a/cache.py
 +++ b/cache.py
-@@ -4,21 +4,23 @@ import time
+@@ -4,21 +4,25 @@ import time
  
  
  class TTLCache:
@@ -25,6 +25,8 @@ index c2e19c4..72111ce 100644
 -        if entry is None:
 +        expiry = self._expires.get(key)
 +        if expiry is None or expiry < time.monotonic():
++            self._values.pop(key, None)
++            self._expires.pop(key, None)
              return None
 -        value, expires = entry
 -        if expires < time.monotonic():

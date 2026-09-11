@@ -29,5 +29,15 @@
       "description": "TextUnmarshallerHookFunc 对 data 做裸类型断言 data.(string)：当值为非 string 底层类型（如间接空指针/自定义类型经 reflect 传入）时 panic——fix 的 reflect.Indirect(...).Elem().String() 兜底被回退"
     }
   ],
-  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）。F=63cde0dfe2（prevent panic in TextUnmarshallerHookFunc，Go）"
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）。F=63cde0dfe2（prevent panic in TextUnmarshallerHookFunc，Go）",
+  "neutral": [
+    {
+      "path": "decode_hooks_test.go",
+      "lines": [
+        552,
+        554
+      ],
+      "reason": "revert 注入把 F 的回归测试用例一起回退——真实 review 里的正当观察（删测试确实该审），非注入 bug"
+    }
+  ]
 }
