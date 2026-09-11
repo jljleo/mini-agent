@@ -193,13 +193,22 @@ def _git(root: Path, *args: str) -> None:
     )
 
 
-def run_review_task(task_dir: Path, meta: dict) -> dict:
-    """review 任务：base/ + bug.patch 在沙箱重建两提交仓库 → review → 对照 ground truth。
-
-    与 chat 任务的差异：无 PROMPT 无对话轮——review 管道自带 prompt；判分不靠
-    verify.py 而靠 META 的 bugs 清单（确定性：path 匹配 + 行号区间）。
+def _build_review_sandbox(task_dir: Path, meta: dict) -> Path:
+    """review 任务沙箱。两种来源：
+    - local：base/（干净代码）+ bug.patch（git apply 注入）
+    - remote（META.remote）：浅克隆真实仓库 @ F（修复提交），revert F 回注真实 bug——
+      真实代码 + 真实缺陷，作者不发明 bug 只标注（E10）
     """
     sandbox = Path(tempfile.mkdtemp(prefix=f"bench_{task_dir.name}_"))
+    remote = meta.get("remote")
+    if remote:
+        _git(sandbox, "init", "-q")
+        _git(sandbox, "remote", "add", "origin", remote["repo"])
+        _git(sandbox, "fetch", "-q", "--depth", "2", "origin", remote["commit"])
+        _git(sandbox, "checkout", "-q", "FETCH_HEAD")  # F（修复后）状态
+        _git(sandbox, "revert", "--no-commit", remote["commit"])  # 回注 bug
+        _git(sandbox, "commit", "-qm", "feature")
+        return sandbox
     shutil.copytree(task_dir / "base", sandbox, dirs_exist_ok=True)
     _git(sandbox, "init", "-q")
     _git(sandbox, "add", ".")
@@ -207,6 +216,16 @@ def run_review_task(task_dir: Path, meta: dict) -> dict:
     _git(sandbox, "apply", str(task_dir / "bug.patch"))
     _git(sandbox, "add", ".")
     _git(sandbox, "commit", "-qm", "feature")
+    return sandbox
+
+
+def run_review_task(task_dir: Path, meta: dict) -> dict:
+    """review 任务：沙箱重建（local/remote）→ review → 对照 ground truth。
+
+    与 chat 任务的差异：无 PROMPT 无对话轮——review 管道自带 prompt；判分不靠
+    verify.py 而靠 META 的 bugs 清单（确定性：path 匹配 + 行号区间）。
+    """
+    sandbox = _build_review_sandbox(task_dir, meta)
 
     saved_root = tools.PROJECT_ROOT
     saved_confirm = tools.confirm

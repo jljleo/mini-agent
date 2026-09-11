@@ -96,3 +96,26 @@ class TestCli:
     def test_build_prompt_contains_axes_and_diff(self):
         prompt = review.build_prompt("DIFF_BODY")
         assert "正确性" in prompt and "规范" in prompt and "DIFF_BODY" in prompt
+
+
+class TestRoundFuse:
+    """两档轮次保险丝：SOFT 档 steering 注入收敛指令，HARD 档才 abort。"""
+
+    def _events(self, n):
+        from mini_agent.kernel.events import TextDelta
+        return [x for i in range(n) for x in (StreamStart(), TextDelta(f"r{i}"))]
+
+    def test_soft_cap_steers_once(self):
+        from mini_agent.kernel.events import TurnControl
+        control = TurnControl()
+        list(review._round_fuse(iter(self._events(review.SOFT_CAP_ROUNDS + 1)), control))
+        assert control.steer.qsize() == 1
+        assert "立即按格式输出" in control.steer.get_nowait()
+        assert not control.interrupt.is_set()  # SOFT 档不打断
+
+    def test_hard_cap_aborts(self):
+        from mini_agent.kernel.events import TurnControl
+        control = TurnControl()
+        out = list(review._round_fuse(iter(self._events(review.HARD_CAP_ROUNDS + 5)), control))
+        assert control.interrupt.is_set()
+        assert len(out) < 2 * (review.HARD_CAP_ROUNDS + 5)  # 流被截断

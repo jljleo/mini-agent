@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review-oss",
+  "difficulty": "real",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "remote": {
+    "repo": "https://github.com/pypa/packaging",
+    "commit": "55cbf1b9426f44455fa1a9e0836f1fc082cc8452"
+  },
+  "bugs": [
+    {
+      "id": "unbounded-bounds-sort",
+      "path": "src/packaging/_ranges.py",
+      "lines": [
+        173,
+        263
+      ],
+      "description": "无界边界（None 表示 -inf/+inf）参与排序时比较逻辑错误：两种拼写的无界界会互相排在对方之上"
+    }
+  ],
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）"
+}

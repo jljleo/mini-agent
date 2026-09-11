@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review-oss",
+  "difficulty": "real",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "remote": {
+    "repo": "https://github.com/pallets/click",
+    "commit": "762c97eef7c1b3779678992f26a553a2a8c80793"
+  },
+  "bugs": [
+    {
+      "id": "double-bracket-synopsis",
+      "path": "src/click/core.py",
+      "lines": [
+        3566,
+        3589
+      ],
+      "description": "synopsis 生成恢复双重方括号：可选参数被包裹成 [[...]]，用法说明格式错误"
+    }
+  ],
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）"
+}

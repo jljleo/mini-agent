@@ -26,8 +26,32 @@ from mini_agent.tools import gitdiff
 from mini_agent.tools.registry import get_tool_schemas
 from mini_agent.ui import renderer as ui
 
-# review 会话的轮次上限（无人值守保险丝加在调用侧——交互循环无硬上限是刻意设计）
-MAX_REVIEW_ROUNDS = 8
+# review 会话的轮次保险丝（无人值守保险丝加在调用侧——交互循环无硬上限是刻意设计）。
+# 两档：SOFT 档经 steering 注入「立即收敛输出 findings」（E10：真实仓库的调研轮次
+# 远超合成任务，硬断会得到半成品中间文本而非 findings）；HARD 档才 abort。
+SOFT_CAP_ROUNDS = 8
+HARD_CAP_ROUNDS = 12
+
+_SOFT_CAP_MESSAGE = (
+    "[系统] 轮次预算即将用尽：不要再调用工具，基于已收集的信息"
+    "立即按格式输出 findings（无把握就写「无 findings」）。"
+)
+
+
+def _round_fuse(stream, control):
+    """轮次保险丝（生成器包装）：SOFT 档注入收敛指令一次，HARD 档 abort。"""
+    rounds = 0
+    steered = False
+    for ev in stream:
+        if isinstance(ev, StreamStart):
+            rounds += 1
+            if rounds >= HARD_CAP_ROUNDS:
+                control.abort()
+                return
+            if rounds >= SOFT_CAP_ROUNDS and not steered:
+                control.steer.put(_SOFT_CAP_MESSAGE)
+                steered = True
+        yield ev
 
 _REVIEW_PROMPT = """请对以下变更做 code review。可以用 read_file / search_symbols / run_bash（只读命令）查看相关代码上下文，但审查对象只是变更本身。
 
@@ -101,22 +125,12 @@ def run_review(spec: str | None = None, *, root: str | None = None,
     session = ChatSession(tools=tools, set_provider=False)
     events, control = run_in_thread(lambda c: session.chat(build_prompt(diff_text), control=c))
 
-    def capped(stream):
-        """轮次保险丝：超 MAX_REVIEW_ROUNDS 即 abort（防 context 深挖失控烧 token）。"""
-        rounds = 0
-        for ev in stream:
-            rounds += isinstance(ev, StreamStart)
-            if rounds > MAX_REVIEW_ROUNDS:
-                control.abort()
-                return
-            yield ev
-
     if render:
         # 文本模式：工具调用与 findings 流式渲染（本地可读、CI log 友好）
-        ui.consume(capped(events))
+        ui.consume(_round_fuse(events, control))
     else:
         # 静默模式：内核告警走 stderr，不污染调用侧的结构化输出
-        for ev in capped(events):
+        for ev in _round_fuse(events, control):
             if isinstance(ev, Warn):
                 print(f"⚠ {ev.message}", file=sys.stderr)
 

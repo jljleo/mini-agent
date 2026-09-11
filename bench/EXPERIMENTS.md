@@ -423,3 +423,43 @@ falsy 陷阱伪装成简化 / review_cache_key 三文件特性提交藏缓存 ke
    虚高 precision。真出现再收紧。
 
 **可复现**：`.venv/bin/python bench/run_bench.py review_cache_key`（注意单样本方差）。
+
+---
+
+## 17. 真实仓库回测：revert 注入真实 bug（【E10】）
+
+**动机**：E9 证明合成任务区分度触顶。真实仓库任务堵两个偏差质疑：作者知答案、
+任务过于玩具。取材方式：** revert 注入**——克隆真实仓库 @ 修复提交 F，revert F
+把真实 bug 注回去（真实代码 + 真实缺陷，人工只标注不发明）。
+
+**任务**（3 个，跨 2 个知名项目）：
+- review_oss_packaging_ranges：pypa/packaging #1392（无界边界排序错误，比较逻辑）
+- review_oss_click_sentinel：pallets/click（Sentinel 深拷贝破坏单例语义）
+- review_oss_click_synopsis：pallets/click（synopsis 双重方括号）
+
+**数据**（k3，单样本/任务）：
+
+| 任务 | 首轮 | 修复后 | tokens |
+|---|---|---|---|
+| review_oss_packaging_ranges | ❌ 0 findings | ✅ 1.0 | 133K |
+| review_oss_click_sentinel | ❌ 0 findings | ✅ 1.0 | 62K |
+| review_oss_click_synopsis | ✅ 1.0 | — | 16K |
+
+**副产品（本轮最高价值产出）：评测抓到 review 管道的设计缺陷。**
+两个 FAIL 不是模型没看到 bug——原始输出显示模型「继续看 _ranges.py 的其余部分…」
+还在调研中，**轮次保险丝（8 轮硬熔断）把 review 拦腰截断**，终稿是半成品中间文本，
+findings 为空。真实仓库的调研深度（读大文件、追调用方、验证语义）远超合成任务。
+修复：两档保险丝——SOFT 档（8 轮）经 steering 通道注入「立即收敛输出 findings」，
+HARD 档（12 轮）才 abort。这正是 TurnControl.steer 设计来干的事。修复后两个
+FAIL 双双转 PASS。
+
+**结论（诚实边界：3 任务、单样本、一次网络瞬断重试）**：
+1. 真实任务区分度真实存在：首轮 2/3 FAIL（合成任务全 PASS）——成本也真实
+   暴露（16K-133K tokens/任务，10 倍于合成任务）。
+2. 「检出率」只是指标之一：**管道行为（熔断时机）本身就是检出率的一部分**——
+   review agent 的质量 = 模型能力 × 管道给它的空间。
+3. 网络瞬断（RemoteProtocolError）一次：重试即过，记为基础设施噪音而非信号。
+   后续若要严格，bench 需要失败重试策略。
+
+**可复现**：`.venv/bin/python bench/run_bench.py review_oss_packaging_ranges`
+（remote 任务需联网克隆；META 里有固定 commit sha）。

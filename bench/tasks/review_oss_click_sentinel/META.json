@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review-oss",
+  "difficulty": "real",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "remote": {
+    "repo": "https://github.com/pallets/click",
+    "commit": "f58ca3e81424a35626c8a475eb59ab95589008ce"
+  },
+  "bugs": [
+    {
+      "id": "sentinel-copy",
+      "path": "src/click/_utils.py",
+      "lines": [
+        13,
+        37
+      ],
+      "description": "Sentinel 枚举成员被删掉 __copy__/__deepcopy__/__reduce__：copy.deepcopy 会造出第二个实例，破坏单例语义（is 比较失败）"
+    }
+  ],
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）"
+}
