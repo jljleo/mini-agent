@@ -463,3 +463,38 @@ FAIL 双双转 PASS。
 
 **可复现**：`.venv/bin/python bench/run_bench.py review_oss_packaging_ranges`
 （remote 任务需联网克隆；META 里有固定 commit sha）。
+
+---
+
+## 18. 并行双通道 A/B（【E11】——recall 假设被否定，precision 有收益）
+
+**动机**：R1 刻意留下的实验——并行 researcher 通道（每轴一个独立会话，Python
+确定性合并）是否优于单通道双轴基线。假设：轴聚焦提升 recall（单通道两轴互相
+稀释注意力）。
+
+**控制变量**：同一 9 任务评测集（6 合成 + 3 OSS revert 注入）、同模型 k3、
+同 prompt 内容（仅轴范围不同）、合并逻辑零 LLM 成本（path:line 去重 severity 取高）。
+唯一变量 = single / parallel。样本：合成 n=3/组，OSS n=1/组（成本约束）。
+污染剔除：E10 保险丝修复前的 FAIL 不计入（那是旧管道的行为）。
+
+**数据**（E11 批次 42 次运行）：
+
+| 模式 | recall | precision | tokens/任务 |
+|---|---|---|---|
+| single（基线） | 0.963 | 0.889 | 25.3K |
+| parallel | 0.944 | **1.000** | 33.2K（+32%） |
+
+**结论（诚实边界：OSS 单样本、任务集小、recall 多在天花板）**：
+1. **recall 假设被否定**：并行不提升检出（0.944 vs 0.963，差异在噪音内）。
+   「轴间注意力稀释」在当前任务规模上不成立。
+2. **precision 有真实收益**：parallel 零误报（9/9 任务），single 在两个 OSS 任务上
+   各出 1 条遐想 finding（precision 0.5）。机制解释：standards 轴 prompt 写死
+   「只报违反明文约定的」，约束了自由发挥。对「门禁可用性」而言 precision 比
+   recall 更关键（误报多 = 用户关掉它）。
+3. **成本 +32%** 换 precision +0.11。当前结论：默认保持 single，parallel 留作
+   --mode 实验开关；门禁场景（precision 敏感）可以考虑 parallel。
+4. 已知天花板效应：多数任务 recall=1.0 两组无差异，cache_key（唯一有漏检的任务）
+   反而 single 略优——漏检的是「孤儿缓存条目」这类二次推理 bug，轴划分对它无影响。
+
+**可复现**：`bench/run_bench.py <task> --review-mode=single|parallel`；
+聚合脚本见 E11 对话记录（results/*.json 按 task+mode 分组取最新 n）。
