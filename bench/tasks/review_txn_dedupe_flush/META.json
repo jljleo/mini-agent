@@ -13,7 +13,17 @@
         23,
         23
       ],
-      "description": "缓冲按 payment_id 存（每笔支付唯一），flush 按 order_id 入账：同订单的重复回调（幂等重试）不被去重，逐条入账导致同一订单金额重复累计——去重键族与入账键族不一致"
+      "description": "缓冲按 payment_id 存（每笔支付唯一），flush 按 order_id 入账：同订单的重复回调（幂等重试）不被去重，逐条入账导致同一订单金额重复累计——去重键族与入账键族不一致",
+      "aliases": [
+        {
+          "path": "reconcile.py",
+          "lines": [
+            14,
+            14
+          ],
+          "description_append": "类 docstring 声明契约处（「同订单重复回调应去重」）——模型报告契约声明位置是可接受定位（E8 教训复发样本）"
+        }
+      ]
     },
     {
       "id": "return-unit-drift",
