@@ -446,3 +446,48 @@ jobs:
 本仓库 `.github/workflows/review.yml` 即 `uses: ./` 本地 action +
 `install_from: "."`——每个 PR 用 PR 自己的代码 review 自己（自举），
 action 封装因此被每个 PR 实测。
+
+### 12.5 其它平台 CI（宿主无关，一行命令）
+
+led 的底层是 exit code 门禁 CLI，任何 CI 都能接——GitHub Action 只是最顺手的
+封装。以下示例覆盖 GitLab / Gitea / 自建 runner：
+
+```yaml
+# GitLab CI（.gitlab-ci.yml）：MR 时自动 review
+led-review:
+  stage: test
+  image: python:3.13
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    KIMI_CODE_API_KEY: $KIMI_CODE_API_KEY   # 项目 Settings → CI/CD → Variables
+  script:
+    - pip install led-review
+    - led review "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}...HEAD" --no-fail
+
+# Gitea / 自建 runner（等价概念）
+steps:
+  - name: led review
+    run: |
+      pip install led-review
+      led review "origin/main...HEAD" --no-fail
+```
+
+- 想开门禁：去掉 `--no-fail`（high findings → 非零 → pipeline 失败）
+- review 产物的 `--format json` 可直接供告警/看板消费
+
+### 12.6 本地自动：git hook（一次安装，零操作）
+
+在任何 git 仓库里装一次，之后每次 commit / push 自动 review（运行在用户自己的
+机器、用用户自己的 key）：
+
+```bash
+pipx install led-review          # 或源码 .venv/bin/python -m mini_agent
+led install-hook                 # 默认 pre-push：push 前自动 review 最近提交
+led install-hook --pre-commit    # 加装 pre-commit：commit 前 review 工作区
+led install-hook --fail-on-high  # 本地门禁：high findings 阻塞 commit/push
+led uninstall-hook               # 卸载（默认全部；--pre-commit/--pre-push 指定）
+```
+
+- `KIMI_CODE_API_KEY` 未设置时 hook 静默跳过（不打断流程）
+- hook 只装在你的 `.git/hooks/`，不会自动传播给他人（git 设计如此，非缺陷）

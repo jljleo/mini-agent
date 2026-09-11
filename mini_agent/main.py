@@ -89,12 +89,16 @@ def _chat_loop(session: ChatSession) -> None:
 
 
 def main() -> None:
-    # 子命令分发：review 是唯一子命令（非交互批处理，CI/评测的机器接口）；
-    # 无子命令 = 交互 REPL（辅助形态）
+    # 子命令分发：review 是主形态（非交互批处理）；install-hook/uninstall-hook 是
+    # 本地自动接入（git 钩子）；无子命令 = 交互 REPL（辅助形态）
     if len(sys.argv) > 1 and sys.argv[1] == "review":
         from mini_agent import review as review_cmd
 
         raise SystemExit(review_cmd.cli(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] in ("install-hook", "uninstall-hook"):
+        from mini_agent import hooks as hooks_cmd
+
+        raise SystemExit(hooks_cmd.cli(sys.argv[1:]))
 
     session = ChatSession()
     set_status_provider(session.status_text)  # tty 输入区底部状态栏：模型 · 上下文窗口 · token 累计
