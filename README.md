@@ -12,6 +12,9 @@ mini-agent review --format json  # 机器消费（CI/评测）
 
 不带子命令启动则进入通用 coding agent REPL（辅助形态）。
 
+> 📖 **完整使用文档见 [docs/USAGE.md](docs/USAGE.md)**——安装、模型档案、review/REPL
+> 两种形态、权限与安全模型、评测体系、开发与排查。
+
 ## 凭什么不同
 
 - **检出率可度量**：自带 benchmark 体系（`bench/`），review 质量用注入 bug 任务量化
