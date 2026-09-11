@@ -1,0 +1,15 @@
+diff --git a/ratelimit.py b/ratelimit.py
+index caa9a39..43aaf50 100644
+--- a/ratelimit.py
++++ b/ratelimit.py
+@@ -14,8 +14,8 @@ class RateLimiter:
+     def allow(self, user: str) -> bool:
+         now = time.monotonic()
+         hits = self._hits.setdefault(user, [])
+-        while hits and hits[0] <= now - self._window_s:
+-            hits.pop(0)
++        if hits and hits[0] <= now - self._window_s:
++            hits.pop(0)  # 只清一条过期戳：残留旧时间戳 → 计数虚高、过早 429、内存只增
+         if len(hits) >= self._limit:
+             return False
+         hits.append(now)

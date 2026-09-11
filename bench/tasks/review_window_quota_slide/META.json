@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "window-cleanup-single",
+      "path": "ratelimit.py",
+      "lines": [
+        17,
+        18
+      ],
+      "description": "滑动窗口清理把 while 换成 if：每次 allow 只清一条过期时间戳，其余残留 → len(hits) 虚高导致过早 429，且内存只增不衰（一行之差，需追踪窗口语义）"
+    }
+  ]
+}

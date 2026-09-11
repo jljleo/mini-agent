@@ -1,0 +1,39 @@
+diff --git a/reconcile.py b/reconcile.py
+index 4541300..8366684 100644
+--- a/reconcile.py
++++ b/reconcile.py
+@@ -1,4 +1,4 @@
+-"""支付回调对账。"""
++"""支付回调缓冲对账。"""
+ 
+ from dataclasses import dataclass
+ 
+@@ -10,6 +10,25 @@ class Payment:
+     amount_cents: int
+ 
+ 
+-def reconcile(payment: Payment, ledger: dict[str, int]) -> None:
+-    """单笔回调即时入账：同一订单多笔支付叠加。"""
+-    ledger[payment.order_id] = ledger.get(payment.order_id, 0) + payment.amount_cents
++class Reconciliator:
++    """回调缓冲：enqueue 先进缓冲，flush 定时批量落账。同订单重复回调应去重
++    （回调方可能重试）；0 元心跳不入账。"""
++
++    def __init__(self) -> None:
++        self._buffer: dict[str, Payment] = {}
++
++    def enqueue(self, payment: Payment) -> None:
++        if payment.amount_cents == 0:
++            return  # 0 元是心跳（回调方保活探测），无需入账
++        self._buffer[payment.payment_id] = payment
++        # 同 order 的重复回调（幂等重试）各进一条——缓冲只能按唯一键去重
++
++    def flush(self, ledger: dict[str, int]) -> int:
++        """落账并清空缓冲；返回本轮入账总金额（单位：分）。"""
++        aggregate = 0
++        while self._buffer:
++            p = next(iter(self._buffer.values()))
++            self._buffer.pop(p.payment_id)
++            ledger[p.order_id] = ledger.get(p.order_id, 0) + p.amount_cents
++            aggregate += p.amount_cents
++        return aggregate // 100  # ← 声明返回「分」，这里整除 100 变元并丢余数

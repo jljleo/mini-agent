@@ -567,3 +567,36 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
      方向：设计 bug 时保持无关行为不变（pop 语义保留），杂音是任务设计可抹平的。
 - 可复现：`bench/run_bench.py review_ttl_refresh_stale`（及其余 5 个）；
   结果在 bench/results/*20260911-14*.json。
+
+---
+
+### 【E12.5】2026-09-11 加深任务第一炮：multi-bug+诱饵（txn）与状态残留（quota），假漏检机制缺陷被抓
+
+- 动机：E12 结论「合成单体 bug 已到 recall 天花板」。加深两档：multi-bug 混合
+  （两个真 bug 需跨调用/跨契约追踪）+ 诱饵（red herring，带注释的设计行为，
+  报了即 FP，测 precision 防线）；quota 是「一行差（while→if）要追踪窗口
+  语义」的二次推理难度档。
+- 控制变量：k3、single、n=1；同一底座 base→bug.patch 合成模式；无 prompt/内核改动。
+- 设施：`bench/run_bench.py review_txn_dedupe_flush|review_window_quota_slide`。
+- 数据（2 任务，~17K tokens）：
+
+  | 任务 | recall | precision | FP | 首次判定 |
+  |---|---|---|---|---|
+  | review_window_quota_slide | 1.0 | 1.0 | 0 | 一次过 |
+  | review_txn_dedupe_flush | 1.0（初判 0.5，假漏检） | 1.0 | 0 | 修完重跑 |
+
+- 结论：
+  1. **加深任务仍未砸穿 recall**：multi-bug 两条真 bug 全检出（去重键族 25 行、
+     return 单位 35 行），诱饵（0 元心跳入账跳过）没被当成 FP——k3 在
+     8-9K tokens 预算内对这两个难度档依旧饱和。区分度要再加深（大仓库、
+     跨文件状态、或弱模型验证）。
+  2. **precision 防线 1.0**：诱饵零误报，注释防御被正确信任——precision 维度的
+     加深验证通过（E11 说门禁场景 precision 敏感，这条线目前很硬）。
+- 副产品（高价值，评测机制缺陷）：
+  **假漏检：bug zones 重叠导致 finder 错配**。txn 初判 recall=0.5（missed=
+  return-unit-drift）是假象——模型两条都报了：bug A 的 alias（ledger 入账行 32）
+  与 bug B 主区（return 行 34）间距 2 行 < 2×tolerance(3)，alias 区间 29-35 吞掉了
+  本该属于 bug B 的 finding，真实去重 finding 落单。修复：**ground truth zones 间距
+  必须 > 2×line_tolerance，alias 不得靠近其它 bug 的 zone**。重放判分 recall=1.0
+  后重跑端到端确认。教训：判分几何错误能伪装成模型漏检——zones 排布要静态检查。
+- 可复现：两条命令同上；结果在 bench/results/*20260911-15*.json。

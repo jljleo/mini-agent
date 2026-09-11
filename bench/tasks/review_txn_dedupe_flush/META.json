@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "dedupe-key-family-mismatch",
+      "path": "reconcile.py",
+      "lines": [
+        23,
+        23
+      ],
+      "description": "缓冲按 payment_id 存（每笔支付唯一），flush 按 order_id 入账：同订单的重复回调（幂等重试）不被去重，逐条入账导致同一订单金额重复累计——去重键族与入账键族不一致"
+    },
+    {
+      "id": "return-unit-drift",
+      "path": "reconcile.py",
+      "lines": [
+        34,
+        34
+      ],
+      "description": "flush docstring 声明返回「分」，实现 `aggregate // 100` 变成元并整除丢余数（0~99 分对账丢失）——单位契约不一致"
+    }
+  ],
+  "note": "加深任务（E12.5）：multi-bug + 诱饵。诱饵=21-22 行「0 元心跳不入账」——带注释的设计行为，模型报它计 FP（设计意图：precision 挑战）"
+}
