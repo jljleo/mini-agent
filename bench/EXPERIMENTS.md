@@ -524,3 +524,45 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
 **工序沉淀**（防再犯）：evaluation commit 的提交信息与代码必须逐条对账——
 写「单测：……」，git 历史里就该有对应符号。提交前跑一次 `pytest` 是最后防线
 （这次就是 pytest 先抓到，CI 未跑）。
+
+---
+
+### 【E12】2026-09-11 多语言任务库摸底：6 新任务全检出，precision 0.833，OSS 注入副作用被抓
+
+- 动机：R3 方向一任务库 26→32（+3 合成二次推理族 +3 OSS revert 注入，语言覆盖
+  Go/Rust/JS）。跑第一轮摸底：新任务的检出质量如何、多语言下 review 行为是否一致、
+  有没有可改进的判分/任务设计问题。
+- 控制变量：同一模型 k3、single 模式（默认基线）、每任务 n=1（摸底不过度烧钱）。
+  任务集 = 3 合成（二次推理族）+ 3 OSS；无 prompt/内核改动（纯任务新增）。
+- 设施：`bench/run_bench.py <task>`；合成任务 base+bug.patch，OSS 任务
+  remote revert 注入（F 为该仓库真实修复）。样本 n=1/任务。
+- 数据（E12 批次 6 次运行，总 ~109K tokens，~6 分钟）：
+
+  | 任务 | 语言 | recall | precision | FP | tokens |
+  |---|---|---|---|---|---|
+  | review_ttl_refresh_stale | py | 1.0 | 0.5 | 1 | 8.7K |
+  | review_pool_lease_leak | py | 1.0 | 1.0 | 0 | 8.8K |
+  | review_mirror_index_stale | py | 1.0 | 1.0 | 0 | 7.7K |
+  | review_oss_mapstructure_unmarshal_panic | go | 1.0 | 0.5 | 1 | 12.6K |
+  | review_oss_chrono_offset_24h | rust | 1.0 | 1.0 | 0 | 52.3K |
+  | review_oss_morgan_token_escape | js | 1.0 | 1.0 | 0 | 18.9K |
+
+- 结论：
+  1. **6/6 全检出，recall 天花板依旧**——与 E11 观察一致（任务对 k3 可检出面饱和）。
+     这批「二次推理族」本意压 E11 的 cache_key 漏检面，但 k3 全过了；真正的区分度
+     提升要靠更难任务（multi-bug 混合、更大仓库），合成单体 bug 已到天花板。
+  2. **precision 0.833（5/6）**：两个 FP 各有成因（见副产品），非模型泛化错误。
+     多语言（go/rust/js）行为与 py 无差异——语言不是区分维度。
+  3. **OSS 注入的成本随仓库规模放大**：chrono 52K tokens 是 packaging(21K) 的两倍
+     多——大仓库的 repo map 注入+read_file 深挖成本显著；任务成本预算要考虑。
+- 副产品（两个判分/任务设计问题，比跑分更有价值）：
+  1. **OSS revert 注入的机制性 FP**（mapstructure，decode_hooks_test.go:553）：
+     revert F 会连 F 的测试改动一起回退，diff 里出现「删回归测试」，模型报告
+     「回归覆盖被移除」——真实 review 里这是**正当观察**（删测试确实该审），但
+     它不是注入 bug。方向：OSS 任务把测试回退区标为 neutral，或调整注入方式
+     （revert 后复原测试文件，只留 src 的 bug）。
+  2. **合成任务的行为杂音 FP**（ttl，cache.py:20）：旧实现 get 会 pop 过期条目，
+     拆分两表后 pop 没了，模型报「不再清理过期条目」——不是 bug 是行为变化。
+     方向：设计 bug 时保持无关行为不变（pop 语义保留），杂音是任务设计可抹平的。
+- 可复现：`bench/run_bench.py review_ttl_refresh_stale`（及其余 5 个）；
+  结果在 bench/results/*20260911-14*.json。
