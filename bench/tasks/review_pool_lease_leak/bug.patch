@@ -1,0 +1,30 @@
+diff --git a/pool.py b/pool.py
+index 0b9da1a..0ba9f75 100644
+--- a/pool.py
++++ b/pool.py
+@@ -8,9 +8,12 @@ class Connection:
+     def ping(self) -> bool:
+         return self._ok
+ 
++    def close(self) -> None:
++        self._ok = False
++
+ 
+ class Pool:
+-    """固定容量连接池：acquire/release 配对使用。"""
++    """固定容量连接池：acquire/release 配对使用，get_conn 带健康检查。"""
+ 
+     def __init__(self, size: int = 2) -> None:
+         self._free: list[Connection] = [Connection() for _ in range(size)]
+@@ -28,3 +31,11 @@ class Pool:
+             raise RuntimeError("重复释放")
+         self._busy.discard(id(conn))
+         self._free.append(conn)
++
++    def get_conn(self) -> Connection:
++        """借出连接；ping 不通时报废（损坏连接不可回池复用，避免污染后续租约）。"""
++        conn = self.acquire()
++        if not conn.ping():
++            conn.close()
++            raise ConnectionError("连接不可用")
++        return conn

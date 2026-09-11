@@ -498,3 +498,29 @@ FAIL 双双转 PASS。
 
 **可复现**：`bench/run_bench.py <task> --review-mode=single|parallel`；
 聚合脚本见 E11 对话记录（results/*.json 按 task+mode 分组取最新 n）。
+
+---
+
+### 【E11 补遗】2026-09-11 评测代码合入事故：parallel 实现从未进 git（dogfood 抓到，非 API 评测）
+
+**事件**：E11 提交 `7ba5226`（feat(review): parallel 双通道模式）只合入了
+`bench --review-mode` 接线、CLI `--max-findings` 与 3 条单测，**`_run_one` /
+`_merge_findings` / `run_review(mode=)` 实现本身没有进 git**。合入后 main 状态：
+- `test_review.py::TestParallelMode` 2 条测试挂（AttributeError: 无 `_merge_findings`）
+- `bench/run_bench.py <review任务>` 当场 TypeError（`mode=` 不是 run_review 的关键字参数）
+
+**根因**：评测在本地未提交状态跑完并留档，提交时只 add 了部分文件/部分 diff
+（bench 接线 + 测试先到，实现没跟上）。E11 数据的「可复现」承诺因此在合入后
+是假的——这是「评测必留档」纪律的教科书式反例：**数据留档 ≠ 代码留档，
+可复现性必须靠 commit 里能跑的代码保证，不靠留档文字**。
+
+**修复**（本次提交）：按测试契约恢复实现——`_run_one(prompt, render)` 共用
+只读工具面+保险丝；`_merge_findings`（path:line 去重、severity 取高、同 severity
+先到先得、high 在前）；`run_review(mode=single|parallel)` 恒返回 sessions 列表；
+CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写的，与当年跑出 E11
+数据的那份本地代码**不是逐字节同源**（契约一致：两轴独立会话 + 确定性合并），
+后续有 parallel 评测结论时按恢复版重新累积数据。
+
+**工序沉淀**（防再犯）：evaluation commit 的提交信息与代码必须逐条对账——
+写「单测：……」，git 历史里就该有对应符号。提交前跑一次 `pytest` 是最后防线
+（这次就是 pytest 先抓到，CI 未跑）。

@@ -6,8 +6,9 @@
   不写文件，非 tty 环境下审批默认拒绝——CI 零人工
 - 输出机器可消费：--format json 时 stdout 只出 JSON（raw 字段保留原文防解析丢失）；
   exit code 默认门禁语义（high findings → 1），--no-fail 关闭
-- 基线设计（评测纪律）：单通道双轴。并行通道/多轮深挖是 R2 的 A/B 实验组——
-  没有基线，增强的收益无法度量
+- 基线设计（评测纪律）：默认单通道双轴；parallel 是 E11 的 A/B 实验组
+  （run_review(mode=) / bench --review-mode 开关）——有基线才有度量，结论是
+  默认 single、parallel 留作精度敏感（门禁）场景的实验开关
 """
 
 from __future__ import annotations
@@ -53,21 +54,42 @@ def _round_fuse(stream, control):
                 steered = True
         yield ev
 
-_REVIEW_PROMPT = """请对以下变更做 code review。可以用 read_file / search_symbols / run_bash（只读命令）查看相关代码上下文，但审查对象只是变更本身。
+_REVIEW_HEADER = """请对以下变更做 code review。可以用 read_file / search_symbols / run_bash（只读命令）查看相关代码上下文，但审查对象只是变更本身。
 
-审查分两个轴：
-1. 【正确性】（主）：逻辑错误、边界条件、空值/溢出、错误处理遗漏、与既有代码行为不一致。只报有把握的真问题，宁缺毋滥；拿不准的不报。
-2. 【规范】：对照项目 AGENTS.md 与已注入 skills 的约定检查违规。
+{axes}
 
 输出格式（严格遵守，会被程序解析）：
 - 每个 finding 一行：- [severity] 路径:行号 — 问题描述（severity 只能是 high / medium / low）
 - 某条需要给修复建议时，下一行缩进两个空格写：建议：……
-- 两个轴都没有 finding 时，写一行：无 findings
+- {no_findings_line}
 - findings 之后写一节「## 总结」，两三句话评价这次变更的整体质量
 
 变更如下：
 
 {diff}"""
+
+# 轴指令（E11 parallel 实验组）：single = 双轴合一基线；correctness / standards =
+# 单轴聚焦 prompt。两轴 prompt 内容互斥——standards 轴不含【正确性】字样（用例区分轴）。
+_AXES: dict[str, tuple[str, str]] = {
+    "single": (
+        "审查分两个轴：\n"
+        "1. 【正确性】（主）：逻辑错误、边界条件、空值/溢出、错误处理遗漏、"
+        "与既有代码行为不一致。只报有把握的真问题，宁缺毋滥；拿不准的不报。\n"
+        "2. 【规范】：对照项目 AGENTS.md 与已注入 skills 的约定检查违规。",
+        "两个轴都没有 finding 时",
+    ),
+    "correctness": (
+        "审查只聚焦一个轴：\n"
+        "【正确性】（主）：逻辑错误、边界条件、空值/溢出、错误处理遗漏、"
+        "与既有代码行为不一致。只报有把握的真问题，宁缺毋滥；拿不准的不报。",
+        "没有 finding 时",
+    ),
+    "standards": (
+        "审查只聚焦一个轴：\n"
+        "【规范】：对照项目 AGENTS.md 与已注入 skills 的约定检查违规。",
+        "没有 finding 时",
+    ),
+}
 
 
 @dataclass
@@ -98,7 +120,15 @@ def parse_findings(text: str) -> list[Finding]:
 
 
 def build_prompt(diff_text: str) -> str:
-    return _REVIEW_PROMPT.format(diff=diff_text)
+    """单通道基线 prompt：双轴合一（默认形态）。"""
+    axes, no_findings = _AXES["single"]
+    return _REVIEW_HEADER.format(axes=axes, no_findings_line=no_findings, diff=diff_text)
+
+
+def build_axis_prompt(diff_text: str, axis: str) -> str:
+    """parallel 单轴 prompt：只留该轴指令（E11：轴聚焦防两轴注意力互稀释）。"""
+    axes, no_findings = _AXES[axis]
+    return _REVIEW_HEADER.format(axes=axes, no_findings_line=no_findings, diff=diff_text)
 
 
 def _final_text(session: ChatSession) -> str:
@@ -111,19 +141,14 @@ def _final_text(session: ChatSession) -> str:
     return ""
 
 
-def run_review(spec: str | None = None, *, root: str | None = None,
-               render: bool = False) -> tuple[str, list[Finding], ChatSession | None]:
-    """跑一轮 review，返回 (终稿原文, 结构化 findings, session)。无变更返回 ("", [], None)。
+def _run_one(prompt: str, render: bool) -> tuple[str, ChatSession]:
+    """跑单个 review 会话（只读工具面 + 轮次保险丝），返回 (终稿正文, session)。
 
-    输出与 exit code 由调用侧决定：CLI（review()）渲染+门禁；bench 取数据判分。
+    单通道与 parallel 两轴共用同一执行路径——差异只在 prompt（轴范围）。
     """
-    diff_text = gitdiff.collect(spec, root=root)
-    if diff_text == "（无变更）":
-        return "", [], None
-
     tools = get_tool_schemas(config.SUBAGENT_TYPES["researcher"]["tools"])
     session = ChatSession(tools=tools, set_provider=False)
-    events, control = run_in_thread(lambda c: session.chat(build_prompt(diff_text), control=c))
+    events, control = run_in_thread(lambda c: session.chat(prompt, control=c))
 
     if render:
         # 文本模式：工具调用与 findings 流式渲染（本地可读、CI log 友好）
@@ -134,16 +159,62 @@ def run_review(spec: str | None = None, *, root: str | None = None,
             if isinstance(ev, Warn):
                 print(f"⚠ {ev.message}", file=sys.stderr)
 
-    raw = _final_text(session)
-    return raw, parse_findings(raw), session
+    return _final_text(session), session
+
+
+_SEV_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def _merge_findings(groups: list[list[Finding]]) -> list[Finding]:
+    """合并多轴 findings（E11 parallel）：key=path:line 去重，冲突时 severity 高的
+    胜出（描述一并采用；同 severity 先到先得）；按 severity 排序（high 在前）。
+    纯 Python 确定性合并、零 LLM 成本——不用模型归并，可复现。"""
+    merged: dict[tuple[str, int], Finding] = {}
+    for group in groups:
+        for f in group:
+            key = (f.path, f.line)
+            if key not in merged or _SEV_RANK[f.severity] < _SEV_RANK[merged[key].severity]:
+                merged[key] = f
+    return sorted(merged.values(), key=lambda f: _SEV_RANK[f.severity])
+
+
+def _run_parallel(diff_text: str, render: bool) -> tuple[str, list[Finding], list[ChatSession]]:
+    """parallel 模式：两轴独立只读会话 + Python 确定性合并（E11 实验组）。"""
+    raws: list[str] = []
+    sessions: list[ChatSession] = []
+    groups: list[list[Finding]] = []
+    for axis in ("correctness", "standards"):
+        text, session = _run_one(build_axis_prompt(diff_text, axis), render)
+        raws.append(text)
+        sessions.append(session)
+        groups.append(parse_findings(text))
+    raw = f"【correctness 轴】\n\n{raws[0]}\n\n【standards 轴】\n\n{raws[1]}"
+    return raw, _merge_findings(groups), sessions
+
+
+def run_review(spec: str | None = None, *, root: str | None = None,
+               render: bool = False, mode: str = "single") -> tuple[str, list[Finding], list[ChatSession]]:
+    """跑一轮 review，返回 (终稿原文, 结构化 findings, sessions)。
+
+    mode：single（默认，双轴合一基线）| parallel（E11 A/B 实验组，两轴独立会话
+    + 确定性合并）。sessions 恒为列表（bench 按会话求和 token；无变更时为空）。
+    输出与 exit code 由调用侧决定：CLI（review()）渲染+门禁；bench 取数据判分。
+    """
+    diff_text = gitdiff.collect(spec, root=root)
+    if diff_text == "（无变更）":
+        return "", [], []
+    if mode == "parallel":
+        return _run_parallel(diff_text, render)
+    raw, session = _run_one(build_prompt(diff_text), render)
+    return raw, parse_findings(raw), [session]
 
 
 def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = True,
            max_findings: int = 0, root: str | None = None) -> int:
     """CLI 壳：跑一轮 review，返回 exit code（默认 high findings → 1，CI 门禁语义）。"""
-    raw, findings, session = run_review(spec, root=root, render=(fmt == "text"))
+    raw, findings, sessions = run_review(spec, root=root, render=(fmt == "text"))
     findings = cap_findings(findings, max_findings)
-    if session is None:
+    if not sessions:
         print("无变更，跳过 review")
         return 0
     high = sum(f.severity == "high" for f in findings)

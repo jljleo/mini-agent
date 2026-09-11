@@ -1,0 +1,38 @@
+diff --git a/cache.py b/cache.py
+index c2e19c4..72111ce 100644
+--- a/cache.py
++++ b/cache.py
+@@ -4,21 +4,23 @@ import time
+ 
+ 
+ class TTLCache:
+-    """键值缓存：条目带过期时间，get 时惰性失效。"""
++    """键值缓存：值与过期时间分表存储，get 惰性失效，后台 refresh 原地刷新。"""
+ 
+     def __init__(self, ttl_s: float = 300.0) -> None:
+         self._ttl_s = ttl_s
+-        self._data: dict[str, tuple[str, float]] = {}
++        self._values: dict[str, str] = {}
++        self._expires: dict[str, float] = {}
+ 
+     def set(self, key: str, value: str) -> None:
+-        self._data[key] = (value, time.monotonic() + self._ttl_s)
++        self._values[key] = value
++        self._expires[key] = time.monotonic() + self._ttl_s
+ 
+     def get(self, key: str) -> str | None:
+-        entry = self._data.get(key)
+-        if entry is None:
++        expiry = self._expires.get(key)
++        if expiry is None or expiry < time.monotonic():
+             return None
+-        value, expires = entry
+-        if expires < time.monotonic():
+-            self._data.pop(key, None)
+-            return None
+-        return value
++        return self._values.get(key)
++
++    def refresh(self, key: str, value: str) -> None:
++        """后台轮询：用最新值原地覆写，不重置过期时间（保持原失效点）。"""
++        self._values[key] = value

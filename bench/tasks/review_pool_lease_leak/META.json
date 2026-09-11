@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "pool-capacity-leak",
+      "path": "pool.py",
+      "lines": [
+        39,
+        40
+      ],
+      "aliases": [
+        {
+          "path": "pool.py",
+          "lines": [
+            37,
+            37
+          ]
+        }
+      ],
+      "description": "get_conn 在 ping 失败路径只 close 不 release：acquire/release 配对被打破，free 列表只减不增、busy 残留死 id——每次健康检查失败池容量永久 -1，N 次失败后 acquire 永远抛 PoolExhausted（有借无还）"
+    }
+  ]
+}

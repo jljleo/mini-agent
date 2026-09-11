@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "medium",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "mirror-index-orphan",
+      "path": "registry.py",
+      "lines": [
+        31,
+        31
+      ],
+      "aliases": [
+        {
+          "path": "registry.py",
+          "lines": [
+            21,
+            21
+          ]
+        }
+      ],
+      "description": "unregister 只清 by_id 不清 by_name：已注销项仍可被 get_by_name 命中（脏读）——双索引的唯一可信来源依赖两个索引同步更新，注销路径破坏了它"
+    }
+  ]
+}

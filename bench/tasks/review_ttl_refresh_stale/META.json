@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "hard",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "refresh-expiry-drift",
+      "path": "cache.py",
+      "lines": [
+        26,
+        26
+      ],
+      "aliases": [
+        {
+          "path": "cache.py",
+          "lines": [
+            16,
+            16
+          ]
+        }
+      ],
+      "description": "set 同时写 values+expires，refresh 只写 values：新 key 或旧 expiry 已失效的 key 经 refresh 灌入后 get 永远返回 None；旧 expiry 未失效的 key 失效点也不再被 TTL 约束（跨调用状态不变量被破坏）"
+    }
+  ]
+}

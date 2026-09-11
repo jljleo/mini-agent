@@ -1,0 +1,12 @@
+diff --git a/registry.py b/registry.py
+index 22fc91f..45e4d7e 100644
+--- a/registry.py
++++ b/registry.py
+@@ -25,3 +25,7 @@ class Registry:
+ 
+     def get_by_name(self, name: str) -> Item | None:
+         return self._by_name.get(name)
++
++    def unregister(self, item_id: int) -> None:
++        """注销：主索引移除；name 索引由下一次 register 同名覆盖兜底。"""
++        self._by_id.pop(item_id, None)
