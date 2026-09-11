@@ -9,12 +9,15 @@
 ## 1. 这是什么
 
 一个 ~4900 行的 Python 3.13 coding agent 内核 + 旗舰应用 **code review agent**。
-两条使用形态：
+五种使用形态（后三种是「用户不需要源码、不需要主动调用」的接入形态）：
 
 | 形态 | 入口 | 定位 |
 |---|---|---|
 | `review` 子命令 | `led review ...` | **主形态**：非交互批处理，CI 可消费，exit code 门禁 |
 | 交互 REPL | `led`（无子命令） | 辅助形态：人机对话式编码助手 |
+| GitHub Action | `jljleo/mini-agent@v1` | 零操作：PR 自动 review 评论（§12.1） |
+| 其它平台 CI | 一行命令 | GitLab/Gitea/自建 runner（§12.5） |
+| 本地 hook | `led install-hook` 一次 | commit/push 自动，本地自审（§12.6） |
 
 review 的机器接口（CI / 本地复现 / 评测）共用同一个调用原语，宿主无关。
 **安全模型**：文件工具是窄接口（围栏限制在 PROJECT_ROOT），`run_bash` 走
@@ -24,12 +27,15 @@ review 的机器接口（CI / 本地复现 / 评测）共用同一个调用原�
 
 ## 2. 安装
 
-### 2.1 pipx（推荐，任意目录可用）
+### 2.1 安装（用户路径——不需要源码）
 
 ```bash
-pipx install .
-led review main...HEAD        # 在任意项目目录下使用
+pipx install led-review          # 从 PyPI 安装（命令 → led）
+led review main...HEAD           # 在任意 git 仓库目录下使用
 ```
+
+> 已发布为 `led-review` 包（PyPI 上 `led` 被占用，命令名仍为 `led`）。
+> 远端受限的环境可改 `pip install --user led-review`。
 
 ### 2.2 源码开发（本仓库）
 
@@ -38,23 +44,27 @@ python3.13 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m mini_agent      # 交互 REPL
 .venv/bin/python -m mini_agent review main...HEAD
+# 本地开发装的命令也是 led（pyproject [project.scripts]）
+.venv/bin/led install-hook
 ```
 
-### 2.3 配置 API key
+### 2.3 配置 API key（BYOK——key 是用户自己的）
 
-默认模型档案 `kimi-code`（模型 `k3`，`https://api.kimi.com/coding/v1`）需要：
+项目是 BYOK 设计：**谁装谁配 key**。默认模型档案 `kimi-code`（模型 `k3`，
+`https://api.kimi.com/coding/v1`）需要：
+
+1. 去 https://www.kimi.com/code/console 申请 `KIMI_CODE_API_KEY`（kimi-code 专用）
+2. 任选一种方式配置：
 
 ```bash
-export KIMI_CODE_API_KEY=sk-xxx
-```
-
-或者把 key 写进**你正在操作的项目目录**下的 `.env` 文件：
-
-```
-KIMI_CODE_API_KEY=sk-your-key-here
+export KIMI_CODE_API_KEY=sk-xxx                            # 环境变量
+# 或把 key 写进你正在操作的项目目录下的 .env 文件：
+#   KIMI_CODE_API_KEY=sk-your-key-here
+# 或 CI Secrets（GitHub Actions / GitLab Variables）
 ```
 
 > ⚠ `.env` 是本仓库的 gitignored 运行时产物，不要提交。
+> ⚠ 不要把你的 key 写进任何会进 git 的文件（含 README/示例）。
 
 ---
 
@@ -395,9 +405,13 @@ mini_agent/
 | 沉淀一条约定 | `skills/<name>/SKILL.md`（index 自动注入） |
 | 量化 review 质量 | `bench/run_bench.py <task>`，结果留档 EXPERIMENTS.md |
 | 换模型 | `/model`（交互）或 `MINI_AGENT_MODEL` 环境变量 |
+| 要让用户零操作接入 | GitHub Action（§12.1）/ 其它 CI（§12.5）/ 本地 hook（§12.6） |
+| 本地装完自动 review | `led install-hook`（一次） |
+| 卸载本地 hook | `led uninstall-hook` |
+| 发布新版本 | 打 tag 触发 publish.yml（§14） |
 ---
 
-## 12. 零操作接入：GitHub Action（前置章节的补充）
+## 12. 零操作接入：GitHub Action
 
 用户不需要源码、不需要手动调用：把 led 作为 GitHub Action 接进自己的仓库，
 PR 一开就自动 review 并评论。
@@ -491,3 +505,79 @@ led uninstall-hook               # 卸载（默认全部；--pre-commit/--pre-pu
 
 - `KIMI_CODE_API_KEY` 未设置时 hook 静默跳过（不打断流程）
 - hook 只装在你的 `.git/hooks/`，不会自动传播给他人（git 设计如此，非缺陷）
+
+---
+
+## 13. 从 0 开始（用户视角，5 分钟上手）
+
+不碰源码，完整路径一次走通：
+
+```bash
+# 1. 安装（一次）
+pipx install led-review
+
+# 2. 配 key（一次，BYOK）
+#    去 https://www.kimi.com/code/console 申请 KIMI_CODE_API_KEY
+export KIMI_CODE_API_KEY=sk-xxx
+
+# 3. 在任一 git 仓库里手动 review
+cd 你的项目
+led review                          # 工作区改动
+led review main...HEAD              # 分支改动
+
+# 4. 装本地自动（一次，之后零操作）
+led install-hook                    # push 前自动 review 最近提交
+led install-hook --pre-commit       # 可选：commit 前也 review
+
+# 5. （可选）GitHub 上想让 PR 自动 review → §12.1 三行 yml
+```
+
+**到此为止**：每次 commit / push / PR 全自动 review，你无需再主动调用任何东西。
+
+---
+
+## 14. 发布与上线（作者视角）
+
+led 对外是 PyPI 包 `led-review` + GitHub Action `jljleo/mini-agent@v1`。
+首次上线（一次性，非代码工作）：
+
+1. 注册 https://pypi.org（发布者账号）
+2. 在 https://pypi.org/manage/account/token/ 创建 API token
+3. 仓库 **Settings → Secrets → Actions** 添加 `PYPI_API_TOKEN`
+4. 打版本 tag 触发 `.github/workflows/publish.yml`：
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0     # → PyPI 发布 led-review
+git tag v1 && git push origin v1              # → Action 引用点（major tag 可移动）
+```
+
+日常发版：改 `pyproject.toml` 版本号 → 打新 tag（如 v0.1.1）→ 移动 `v1` tag
+指向最新（`git tag -f v1 && git push -f origin v1`）。
+
+> 顺序约束：PyPI 发布在前（Action 的 `pip install led-review` 依赖包已存在）；
+> 本仓库自身的 dogfood action 用 `install_from: "."` 不受此约束，可先自测。
+
+---
+
+## 15. 故障排查（接入场景）
+
+| 现象 | 原因 / 解法 |
+|---|---|
+| `pipx install led-review` 报 tree-sitter 依赖错 | 环境 Python 过老（tree-sitter 0.26 需 ≥3.10）；换 3.11+ / 3.13 |
+| `led review` 报「不是 git 仓库」 | 需在 git 仓库内运行（`git init` 或 cd 到仓库） |
+| Action 步骤跳过 | fork PR 被设计跳过（secret 不可用防烧 key）；同仓库 PR 不该跳 |
+| Action 报「pip install 失败」 | `led-review` 未发布到 PyPI 或版本太新——先发版（§14） |
+| Action/插件无评论 | `permissions: pull-requests: write` 缺失（评论需要）或 KIMI_CODE_API_KEY secret 名不对 |
+| hook 不执行 review | hook 里 key 未设会静默跳过（`export KIMI_CODE_API_KEY`）；`led` 不在 PATH（pipx 默认在） |
+| hook 想不阻塞但压住了 | 默认 `--no-fail` 信息性；想阻塞用 `--fail-on-high`（local 门禁） |
+| 评论出中文乱码/解析错 | 确认终端/CI 是 UTF-8；`--format json` 输出带 `raw` 原文可复核 |
+| 费用问题 | BYOK：每个 review 消耗用户自己的 key；低配任务先 `--max-findings` 或缩小范围 |
+
+## 16. 与竞品/同类工具的差异（简述）
+
+- SonarCloud / CodeRabbit 等是**托管服务**：用户交代码、平台跑、平台收费——需要
+  App/服务端/托管 key；led 是 **BYOK 的自部署形态**：跑在用户的地盘（本地
+  hook / 用户自己的 CI），零服务端、零订阅、代码全透明
+- 复用性：`led` 是宿主无关 CLI，任何 CI 一行接；同类的 App 通常绑定单一平台
+- 评测透明：质量用 `bench/` 的注入 bug 任务量化（检出率/误报率可复现，见
+  `bench/EXPERIMENTS.md`），不靠「看起来能 review」
