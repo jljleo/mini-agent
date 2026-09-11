@@ -15,7 +15,9 @@ mini-agent review --format json  # 机器消费（CI/评测）
 ## 凭什么不同
 
 - **检出率可度量**：自带 benchmark 体系（`bench/`），review 质量用注入 bug 任务量化
-  （检出率/误报率），不靠「看起来能 review」
+  （检出率/误报率），不靠「看起来能 review」。当前 35 任务（合成 + 真实仓库 revert
+  注入，覆盖 Python/Go/Rust/JS），k3 实测结论：合成/跨文件/multi-bug 全检出、
+  OSS n=3 零误报（E12 系列，见 `bench/EXPERIMENTS.md`）
 - **代码库感知**：tree-sitter 符号索引（Python/JS/TS/Go/Rust/Java），review 时能定位
   变更的影响面，而不是孤立看 diff
 - **规范可沉淀**：项目的 AGENTS.md 与 `skills/` 约定自动注入 system prompt，作为审查依据

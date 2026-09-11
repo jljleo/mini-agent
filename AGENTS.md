@@ -46,3 +46,9 @@
 - UI 输出统一走语义化 helper；tty 与管道都用 `mini_agent/ui/renderer.py`（StreamRenderer：tty 下 Live 增量重排，管道自动降级纯文本直出）。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
 - `.session.json`、`.chat_history`、`session_todos.json`、`bench/results/` 都是运行时产物，已 gitignore。
 - **评测必留档**：任何真实 API 评测（`bench/run_bench.py` 真跑）完成后必须追加一节到 `bench/EXPERIMENTS.md`（文件头部的强制规范与模板）并随代码提交——负结果也要记；评测抓到内核缺陷（已发生三次：动态注入时序 400、符号链接根误判、@tool 装饰器挂错）是本体系最高价值产出，不许丢在对话里。
+- **评测任务设计准则**（E12 系列豆腐块——新任务/改判分前必须过一遍，每条都有实测事故背书）：
+  合成 bug 保持无关行为不变（别把 base 既有行为弄丢，如 get 的过期清理 pop）；
+  ground truth zones 间距必须 > 2×line_tolerance、alias 不得与其它 bug 的 zone 重叠（重叠 → finder 错配 → 假漏检，E12.5 实锤）；
+  alias 应收录「契约声明处」——docstring 声明契约、实现违反它的 bug，报声明位置是模型的合理定位（E8/E12.8 两次数过）；
+  OSS 注入（remote revert）只选「修 bug」型单父提交（revert「加功能」型得到的是删功能，不是潜伏缺陷），测试文件回退区标 neutral；
+  多样本统计排除 tokens=0 的运行（那是基础设施故障，不是模型漏检，E12.9 实锤）。
