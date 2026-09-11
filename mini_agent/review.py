@@ -259,4 +259,4 @@ def cap_findings(findings: list[Finding], limit: int) -> list[Finding]:
     """限制 findings 输出条数（0 = 不限制）。"""
     if limit <= 0:
         return findings
-    return findings[:limit - 1]
+    return findings[:limit]

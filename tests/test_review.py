@@ -6,7 +6,7 @@ import pytest
 
 import mini_agent.review as review
 from mini_agent.kernel.events import StreamStart, TurnEnd
-from mini_agent.review import parse_findings
+from mini_agent.review import cap_findings, parse_findings
 from mini_agent.tools import gitdiff
 
 SAMPLE_OUTPUT = """- [high] src/auth.py:42 — 空指针：user 可能为 None 时直接访问 user.id
@@ -155,3 +155,28 @@ class TestParallelMode:
         assert len(sessions) == 2
         assert len(findings) == 1 and findings[0].path == "a.py"
         assert "【correctness 轴】" in raw and "【standards 轴】" in raw
+
+
+class TestCapFindings:
+    """--max-findings 截断（E11 事故带入的 cap_findings off-by-one 回归测试）。
+
+    上游 bug：findings[:limit - 1] 使 limit=5 只返回 4 条；且此前零测试覆盖，
+    326 全绿也拦不住。杀青前修复 + 从此有回归线。
+    """
+
+    def _f(self, n):
+        return [review.Finding("low", "f.py", i, f"f{i}") for i in range(n)]
+
+    def test_limit_zero_unlimited(self):
+        fs = self._f(8)
+        assert cap_findings(fs, 0) is fs  # 0 = 不限制（原样返回，不拷贝）
+
+    def test_exact_limit_returns_exact_count(self):
+        fs = self._f(8)
+        assert len(cap_findings(fs, 5)) == 5  # 回归点：曾经是 4
+
+    def test_limit_exceeding_list_ok(self):
+        assert len(cap_findings(self._f(3), 10)) == 3  # 不会越界
+
+    def test_limit_one(self):
+        assert len(cap_findings(self._f(2), 1)) == 1
