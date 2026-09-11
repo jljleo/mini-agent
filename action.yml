@@ -1,0 +1,90 @@
+# led review — 可复用 GitHub Action
+#
+# 用户接入（自己的仓库 .github/workflows/review.yml）：
+#   name: led review
+#   on: pull_request
+#   permissions:
+#     pull-requests: write
+#   jobs:
+#     review:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v4
+#           with: { fetch-depth: 0 }          # review 需要 base...HEAD 完整祖先
+#         - uses: jljleo/mini-agent@v1
+#           with:
+#             api_key: ${{ secrets.KIMI_CODE_API_KEY }}   # BYOK：用户自己的 key
+#
+# PR 一开就自动 review 并评论，无需用户主动调用。默认信息性评论（--no-fail）；
+# 想开门禁设 fail_on_high: "true"（会阻止合并，precision 够格后再用）。
+
+name: "led review"
+description: >
+  PR 上自动运行 led code review（检出率/误报率可复现的 review agent）并评论
+  findings。BYOK：用户自配 KIMI_CODE_API_KEY。
+author: jljleo
+branding:
+  icon: "clipboard-check"
+  color: "purple"
+
+inputs:
+  api_key:
+    description: "KIMI_CODE_API_KEY（用户自己的 key，Repository secrets 传入）"
+    required: true
+  review_spec:
+    description: "审查范围（git revspec）；缺省 = origin/<base>...HEAD"
+    required: false
+    default: ""
+  fail_on_high:
+    description: "true 时 high findings 让 job 失败（门禁）；默认 false 信息性评论"
+    required: false
+    default: "false"
+  install_from:
+    description: "安装来源：缺省 PyPI 包名 led-review（用户场景）；本项目 dogfood 传 '.' 装 PR 源码（自举）"
+    required: false
+    default: "led-review"
+
+runs:
+  using: "composite"
+  steps:
+    - name: 跳过 fork PR（secrets 不可用，也防外部 PR 烧 key）
+      if: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+      shell: bash
+      run: echo "fork PR 跳过（BYOK secret 只在同仓库 PR 可用）" && exit 0
+
+    - name: 取 base 分支（review 的 diff 端点）
+      shell: bash
+      run: |
+        # GITHUB_BASE_REF 是 PR 触发的内置环境变量（base 分支）；缺省 main
+        git fetch -q origin "${GITHUB_BASE_REF:-main}"
+
+    - name: 安装 led
+      shell: bash
+      run: pip install -q "${{ inputs.install_from }}"
+      # 缺省 install_from=led-review（PyPI，用户场景）；dogfood 传 "." 装 PR 源码
+
+    - name: 运行 led review
+      shell: bash
+      env:
+        KIMI_CODE_API_KEY: ${{ inputs.api_key }}
+        REVIEW_SPEC: ${{ inputs.review_spec }}
+        FAIL_ON_HIGH: ${{ inputs.fail_on_high }}
+      run: |
+        SPEC="${REVIEW_SPEC:-origin/${GITHUB_BASE_REF:-main}...HEAD}"
+        {
+          echo "## 🤖 led review"
+          echo
+          if [ "${FAIL_ON_HIGH}" = "true" ]; then
+            led review "$SPEC"          # 门禁：high findings → 非零 → step 失败
+          else
+            led review "$SPEC" --no-fail || true   # 默认信息性评论
+          fi
+        } > review.md
+
+    - name: 评论 findings
+      if: ${{ github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: gh pr comment "$PR_NUMBER" --body-file review.md

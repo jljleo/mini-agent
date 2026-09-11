@@ -15,6 +15,31 @@ led review --format json  # 机器消费（CI/评测）
 > 📖 **完整使用文档见 [docs/USAGE.md](docs/USAGE.md)**——安装、模型档案、review/REPL
 > 两种形态、权限与安全模型、评测体系、开发与排查。
 
+## 零操作接入：GitHub Action（用户不需要源码）
+
+用户自己的仓库里放一个 workflow（3 行核心 + 一个 secret），PR 一开就自动
+review 并评论，不需要任何人手动调用：
+
+```yaml
+# .github/workflows/review.yml
+on: pull_request
+permissions:
+  pull-requests: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: jljleo/mini-agent@v1
+        with:
+          api_key: ${{ secrets.KIMI_CODE_API_KEY }}   # BYOK：用户自己的 key
+```
+
+- led 自动从 PyPI 安装（用户仓库拿不到本项目源码也没关系）
+- 默认信息性评论不阻塞合并；想开门禁加 `fail_on_high: "true"`
+- fork PR 自动跳过（防止外部 PR 烧用户的 key）
+
 ## 凭什么不同
 
 - **检出率可度量**：自带 benchmark 体系（`bench/`），review 质量用注入 bug 任务量化

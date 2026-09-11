@@ -1,13 +1,15 @@
-# PR 自动 code review：led dogfood 闭环（路径 A：CI 触发，人不主动发起）
+# PR 自动 code review：led dogfood 闭环——uses 仓库自身的 action（自举）
 #
-# 每个 PR 用 PR 自己的代码 review 自己的 diff（自举）：
-#   pip install . 安装的是 PR 分支的 led，review 对象也是这个 PR——
-#   改坏了 review 能力的 PR 会立刻体现在自己的 review 质量里。
+# 每个 PR 用 PR 自己的代码 review 自己的 diff：
+#   - uses: ./ 是本地 action 路径（本仓库根 action.yml），install_from: . 装的是
+#     PR 分支源码——改坏 review 能力的 PR 会立刻体现在自己的 review 质量里。
+#   - 用户场景唯一差异是 install_from 缺省（PyPI 包 led-review），其余逻辑相同。
+#   - action 封装被每个 PR 实测，封装坏了的 PR 会自己卡住自己/报错在评论里。
 #
-# 需要在仓库 Settings → Secrets 配置 KIMI_CODE_API_KEY。
+# 需要在仓库 Settings → Secrets 配置 KIMI_CODE_API_KEY（BYOK）。
 # 设计决策：
-#   - --no-fail：当前阶段 review 是信息性评论，不阻塞合并（precision 未被充分
-#     证明前不做门禁；E8-E10 的误报数据够格后再去掉这个 flag）
+#   - fail_on_high 缺省 false：review 是信息性评论，不阻塞合并（precision 未被
+#     充分证明前不做门禁；E8-E10 的误报数据够格后再开门禁）
 #   - fork PR 跳过（secrets 不可用，也防外部 PR 烧 key）
 #   - concurrency cancel：force-push 时取消过期的 review
 
@@ -36,21 +38,7 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install led（PR 自己的代码）
-        run: pip install .
-
-      - name: Review PR diff
-        env:
-          KIMI_CODE_API_KEY: ${{ secrets.KIMI_CODE_API_KEY }}
-        run: |
-          git fetch -q origin "${{ github.base_ref }}"
-          {
-            echo "## 🤖 led review"
-            echo
-            led review "origin/${{ github.base_ref }}...HEAD" --no-fail || true
-          } > review.md
-
-      - name: Comment findings
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file review.md
+      - uses: ./
+        with:
+          api_key: ${{ secrets.KIMI_CODE_API_KEY }}
+          install_from: "."

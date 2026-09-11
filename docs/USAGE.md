@@ -395,3 +395,54 @@ mini_agent/
 | 沉淀一条约定 | `skills/<name>/SKILL.md`（index 自动注入） |
 | 量化 review 质量 | `bench/run_bench.py <task>`，结果留档 EXPERIMENTS.md |
 | 换模型 | `/model`（交互）或 `MINI_AGENT_MODEL` 环境变量 |
+---
+
+## 12. 零操作接入：GitHub Action（前置章节的补充）
+
+用户不需要源码、不需要手动调用：把 led 作为 GitHub Action 接进自己的仓库，
+PR 一开就自动 review 并评论。
+
+### 12.1 用户接入（3 行 + 1 个 secret）
+
+```yaml
+# 用户仓库 .github/workflows/review.yml
+name: led review
+on: pull_request
+permissions:
+  pull-requests: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }      # review 需要 base...HEAD 完整祖先
+      - uses: jljleo/mini-agent@v1
+        with:
+          api_key: ${{ secrets.KIMI_CODE_API_KEY }}   # BYOK
+```
+
+前置（用户侧一次性）：在仓库 Settings → Secrets → Actions 添加
+`KIMI_CODE_API_KEY`（用户自己的 key）。
+
+### 12.2 Action 参数
+
+| input | 缺省 | 说明 |
+|---|---|---|
+| `api_key` | （必填） | KIMI_CODE_API_KEY，secrets 传入 |
+| `review_spec` | `origin/<base>...HEAD` | 审查范围（git revspec） |
+| `fail_on_high` | `false` | `true` 时 high findings 让 job 失败（门禁） |
+| `install_from` | `led-review` | 安装来源（PyPI 包名）；项目自身 dogfood 传 `.` |
+
+### 12.3 行为
+
+- PR 一开自动跑指定范围的 review，findings 以 PR 评论呈现；force-push 后
+  重跑（靠用户 workflow 的 concurrency 控制）
+- 默认信息性评论（不阻塞合并）；precision 数据够格后再开门禁
+- fork PR 自动跳过（secrets 对 fork 不可用，也防外部 PR 烧用户的 key）
+- 与 CLI 完全同管线（同样的 diff 提取 / 双轴 / 门禁语义），零额外复杂度
+
+### 12.4 项目自身的 dogfood
+
+本仓库 `.github/workflows/review.yml` 即 `uses: ./` 本地 action +
+`install_from: "."`——每个 PR 用 PR 自己的代码 review 自己（自举），
+action 封装因此被每个 PR 实测。
