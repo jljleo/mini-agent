@@ -1,0 +1,44 @@
+# 发布到 PyPI：led-review（用户 pipx install led-review 即可用，BYOK——自带 key）
+#
+# 触发：push 任意 tag（推荐语义化：v0.1.0）
+# 前置（一次性，需人工完成）：
+#   1. 注册 https://pypi.org/account/register/（用户名如 jljleo）
+#   2. 在 https://pypi.org/manage/account/token/ 创建 API token（scope: 整个账号）
+#   3. 仓库 Settings → Secrets → Actions 添加: PYPI_API_TOKEN=<token>
+#   4. 可选：test.pypi 先试发（把 publish 步骤的 repository 指到 test.pypi 账号同理）
+#
+# 产物：pipx install led-review → 命令 `led`：
+#   led review "origin/main...HEAD"          # 分支审查，high findings → exit 1
+#   led review --format json                 # 机器消费
+#   led                                     # 交互 REPL
+
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 构建 wheel + sdist
+        run: |
+          pip install -q build
+          python -m build
+
+      - name: 发布到 PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

@@ -1,4 +1,4 @@
-# mini-agent 使用文档（完整版）
+# led 使用文档（完整版）
 
 > 面向使用者（不只是读者）。覆盖安装、配置、两种使用形态（review 批处理 / 交互
 > REPL）、权限与安全模型、评测体系、开发流程与故障排查。
@@ -13,8 +13,8 @@
 
 | 形态 | 入口 | 定位 |
 |---|---|---|
-| `review` 子命令 | `mini-agent review ...` | **主形态**：非交互批处理，CI 可消费，exit code 门禁 |
-| 交互 REPL | `mini-agent`（无子命令） | 辅助形态：人机对话式编码助手 |
+| `review` 子命令 | `led review ...` | **主形态**：非交互批处理，CI 可消费，exit code 门禁 |
+| 交互 REPL | `led`（无子命令） | 辅助形态：人机对话式编码助手 |
 
 review 的机器接口（CI / 本地复现 / 评测）共用同一个调用原语，宿主无关。
 **安全模型**：文件工具是窄接口（围栏限制在 PROJECT_ROOT），`run_bash` 走
@@ -28,7 +28,7 @@ review 的机器接口（CI / 本地复现 / 评测）共用同一个调用原�
 
 ```bash
 pipx install .
-mini-agent review main...HEAD        # 在任意项目目录下使用
+led review main...HEAD        # 在任意项目目录下使用
 ```
 
 ### 2.2 源码开发（本仓库）
@@ -86,10 +86,10 @@ KIMI_CODE_API_KEY=sk-your-key-here
 在**任何 git 仓库**内运行：
 
 ```bash
-mini-agent review                     # 工作区 + 暂存 vs HEAD
-mini-agent review main...HEAD         # 分支范围（默认建议形态）
-mini-agent review a12b3c4             # 单个 commit
-mini-agent review a12b3c4..b56d7e8    # commit 区间
+led review                     # 工作区 + 暂存 vs HEAD
+led review main...HEAD         # 分支范围（默认建议形态）
+led review a12b3c4             # 单个 commit
+led review a12b3c4..b56d7e8    # commit 区间
 ```
 
 输出：结构化 findings（每条含 severity / 文件:行号 / 问题描述 / 修复建议），
@@ -114,7 +114,7 @@ mini-agent review a12b3c4..b56d7e8    # commit 区间
 
 ```yaml
 - run: |
-    mini-agent review "origin/main...HEAD" --format json || test $? -eq 1
+    led review "origin/main...HEAD" --format json || test $? -eq 1
 ```
 
 ### 4.3 工作原理（review 管道）
@@ -139,7 +139,7 @@ mini-agent review a12b3c4..b56d7e8    # commit 区间
 ## 5. 交互 REPL（辅助形态）
 
 ```bash
-mini-agent            # 在项目目录启动，进入对话循环
+led            # 在项目目录启动，进入对话循环
 ```
 
 - tty 下富渲染（Live 增量重排）；管道下自动降级纯文本直出
@@ -386,10 +386,10 @@ mini_agent/
 
 | 想做什么 | 怎么做 |
 |---|---|
-| 审查当前改动 | `mini-agent review` |
-| 审查一个分支 | `mini-agent review main...HEAD` |
-| CI 门禁 | `mini-agent review "origin/main...HEAD"`（high findings → exit 1） |
-| 机器消费 | `mini-agent review ... --format json` |
+| 审查当前改动 | `led review` |
+| 审查一个分支 | `led review main...HEAD` |
+| CI 门禁 | `led review "origin/main...HEAD"`（high findings → exit 1） |
+| 机器消费 | `led review ... --format json` |
 | 只读调研子任务 | 交互里让主 agent 用 `spawn_subagent` 派 researcher |
 | 允许 agent 写代码 | 交互里正常授权（file 工具项目内免确认）；coder 子 agent 的命令需审批 |
 | 沉淀一条约定 | `skills/<name>/SKILL.md`（index 自动注入） |

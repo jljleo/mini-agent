@@ -235,7 +235,7 @@ def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = T
 
 def cli(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        prog="mini-agent review",
+        prog="led review",
         description="code review：审查一个 diff 范围（默认工作区+暂存 vs HEAD）",
     )
     parser.add_argument("spec", nargs="?", default=None,

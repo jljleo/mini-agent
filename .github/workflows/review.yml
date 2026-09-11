@@ -1,7 +1,7 @@
-# PR 自动 code review：mini-agent dogfood 闭环（路径 A：CI 触发，人不主动发起）
+# PR 自动 code review：led dogfood 闭环（路径 A：CI 触发，人不主动发起）
 #
 # 每个 PR 用 PR 自己的代码 review 自己的 diff（自举）：
-#   pip install . 安装的是 PR 分支的 mini-agent，review 对象也是这个 PR——
+#   pip install . 安装的是 PR 分支的 led，review 对象也是这个 PR——
 #   改坏了 review 能力的 PR 会立刻体现在自己的 review 质量里。
 #
 # 需要在仓库 Settings → Secrets 配置 KIMI_CODE_API_KEY。
@@ -36,7 +36,7 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install mini-agent（PR 自己的代码）
+      - name: Install led（PR 自己的代码）
         run: pip install .
 
       - name: Review PR diff
@@ -45,9 +45,9 @@ jobs:
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           {
-            echo "## 🤖 mini-agent review"
+            echo "## 🤖 led review"
             echo
-            mini-agent review "origin/${{ github.base_ref }}...HEAD" --no-fail || true
+            led review "origin/${{ github.base_ref }}...HEAD" --no-fail || true
           } > review.md
 
       - name: Comment findings

@@ -10,7 +10,7 @@
 - 项目主线是 **code review agent**：`mini_agent/review.py` 是 review 管道与子命令（主形态：非交互批处理、CI 可消费、exit code 门禁）；交互 REPL 是辅助形态。diff 提取在 `mini_agent/tools/gitdiff.py`（只读确定性），skills 机制在 `mini_agent/skills.py`（索引常驻注入 + read_file 惰性加载，规范轴载体）。
 - Python 3.13 CLI agent，代码组织为 `mini_agent/` 包（kernel / tools / commands / ui / eval 分层）；有最小 `requirements.txt`（openai / python-dotenv / prompt_toolkit / rich），没有构建步骤、lint 配置或代码生成。使用仓库内虚拟环境：`.venv/bin/python`；新环境先 `.venv/bin/pip install -r requirements.txt`。
 - 代码库感知（mini_agent/repo_map.py）全语言统一走 tree-sitter 解析（lazy import，语言包缺失时该语言静默为空）：python / javascript / typescript(含 tsx) / go / rust / java。加新语言 = 在 repo_map.py 注册 `@_extractor(".xxx")` 提取器 + 装对应 tree-sitter-xxx 包，索引/排序/缓存/检索逻辑语言无关无需改动。
-- 入口是 `mini_agent/main.py`（`.venv/bin/python -m mini_agent`，pipx 安装后 `mini-agent`）：`review` 子命令走 review.py 管道，无子命令进交互主循环 `_chat_loop`（tty/管道自适应）。曾有的 Textual 全屏 TUI 与 patch_stdout 常驻输入框均已于 2026-09 移除（R0：自研全屏 UI 是负资产；patch_stdout 与 Live 光标重绘互斥必闪烁），不要再引入全屏前端或运行中输入框。
+- 入口是 `mini_agent/main.py`（`.venv/bin/python -m mini_agent`，发布后安装 `pipx install led-review` 得到命令 `led`）：`led review` 子命令走 review.py 管道，无子命令进交互主循环 `_chat_loop`（tty/管道自适应）。曾有的 Textual 全屏 TUI 与 patch_stdout 常驻输入框均已于 2026-09 移除（R0：自研全屏 UI 是负资产；patch_stdout 与 Live 光标重绘互斥必闪烁），不要再引入全屏前端或运行中输入框。
 - 运行时配置在 `config.py`，会加载 `.env`；真实运行需要对应档案的 API key（默认档案 kimi-code → `KIMI_CODE_API_KEY`，详见 `.env.example`）。不要读取或提交 `.env`。
 - 内核/UI 边界很重要：`mini_agent/kernel/`（agent / streaming / compact）必须保持为事件生产者，不能 import `mini_agent/ui/`。通过产出/消费 `kernel/events.py` 事件来渲染或上报（`ui.renderer.consume`、bench 消费者）。
 

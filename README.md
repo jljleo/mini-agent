@@ -1,12 +1,12 @@
-# mini-agent
+# led
 
 一个 code review CLI：审查一个 diff 范围（PR、分支、工作区改动），输出结构化 findings
 （severity / 文件:行号 / 问题描述 / 修复建议），带 CI 门禁语义。
 
 ```bash
-mini-agent review main...HEAD    # 审查分支改动
-mini-agent review                # 审查工作区+暂存（默认）
-mini-agent review --format json  # 机器消费（CI/评测）
+led review main...HEAD    # 审查分支改动
+led review                # 审查工作区+暂存（默认）
+led review --format json  # 机器消费（CI/评测）
 # 有 high findings 时退出码为 1——任何 CI 都能直接当门禁用，不绑定特定平台
 ```
 
@@ -34,7 +34,7 @@ mini-agent review --format json  # 机器消费（CI/评测）
 pipx install .
 # 配置 API key：默认档案 kimi-code 需要 KIMI_CODE_API_KEY 环境变量
 # （也可在项目目录放 .env；更多模型档案见 mini_agent/models.default.json）
-cd 你的项目 && mini-agent review HEAD
+cd 你的项目 && led review HEAD
 ```
 
 从源码运行：`pip install -r requirements.txt` 后 `.venv/bin/python -m mini_agent review HEAD`。

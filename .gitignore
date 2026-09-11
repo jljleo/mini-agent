@@ -15,3 +15,8 @@ DESIGN_NOTES.md
 # 打包构建产物
 build/
 *.egg-info/
+
+# 构建/发布产物与 IDE
+dist/
+build/
+.idea/
