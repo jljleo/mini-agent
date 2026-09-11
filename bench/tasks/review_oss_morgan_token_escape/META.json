@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review-oss",
+  "difficulty": "real",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "remote": {
+    "repo": "https://github.com/expressjs/morgan",
+    "commit": "fbf93833186920cc39bb19b247e4a86b61bef4fe"
+  },
+  "bugs": [
+    {
+      "id": "token-output-unescaped",
+      "path": "index.js",
+      "lines": [
+        588,
+        588
+      ],
+      "aliases": [
+        {
+          "path": "index.js",
+          "lines": [
+            64,
+            64
+          ]
+        }
+      ],
+      "description": "token() 不再把 fn 输出统一包一层 escapeLogField：自定义 token（及字符串 format 直接拼入的字段）里的换行/控制字符/行分隔符原样进日志——日志行注入与结构破坏（fix 把 escape 从各 token 内联提为 wrapper 统一保证，此处被回退）"
+    }
+  ],
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）。F=fbf9383318（fix: escape all token values in log output，JS）"
+}

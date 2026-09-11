@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review-oss",
+  "difficulty": "real",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "remote": {
+    "repo": "https://github.com/mitchellh/mapstructure",
+    "commit": "63cde0dfe2481856bcfc2184477b26df770f19d7"
+  },
+  "bugs": [
+    {
+      "id": "unmarshal-text-panic",
+      "path": "decode_hooks.go",
+      "lines": [
+        274,
+        274
+      ],
+      "aliases": [
+        {
+          "path": "decode_hooks.go",
+          "lines": [
+            266,
+            266
+          ]
+        }
+      ],
+      "description": "TextUnmarshallerHookFunc 对 data 做裸类型断言 data.(string)：当值为非 string 底层类型（如间接空指针/自定义类型经 reflect 传入）时 panic——fix 的 reflect.Indirect(...).Elem().String() 兜底被回退"
+    }
+  ],
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）。F=63cde0dfe2（prevent panic in TextUnmarshallerHookFunc，Go）"
+}

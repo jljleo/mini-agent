@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review-oss",
+  "difficulty": "real",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "remote": {
+    "repo": "https://github.com/chronotope/chrono",
+    "commit": "3ffcd1b107fd3085bc184a1f5f7445b97a0d655f"
+  },
+  "bugs": [
+    {
+      "id": "offset-24h-rollover",
+      "path": "src/format/formatting.rs",
+      "lines": [
+        414,
+        414
+      ],
+      "aliases": [
+        {
+          "path": "src/format/formatting.rs",
+          "lines": [
+            416,
+            416
+          ]
+        }
+      ],
+      "description": "Offset 分精度格式化把秒四舍五入到分钟时不加 clamp：FixedOffset 最大 23:59:59，23:59:30 及以上会四舍五入成非法的 +24:00——任何 offset 解析器（含 chrono 自己的 parse_from_rfc3339）都不接受，序列化不能往返"
+    }
+  ],
+  "note": "revert 注入：沙箱 = 真实仓库@F revert F；bug = F 修复过的真实缺陷（真实代码+真实 bug，人工只标注不发明）。F=3ffcd1b107（clamp offset minute rounding to avoid invalid +24:00，Rust）"
+}
