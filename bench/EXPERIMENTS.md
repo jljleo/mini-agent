@@ -600,3 +600,33 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
   必须 > 2×line_tolerance，alias 不得靠近其它 bug 的 zone**。重放判分 recall=1.0
   后重跑端到端确认。教训：判分几何错误能伪装成模型漏检——zones 排布要静态检查。
 - 可复现：两条命令同上；结果在 bench/results/*20260911-15*.json。
+
+---
+
+### 【E12.6】2026-09-11 加深任务 × 交叉模型第一发：k2.7 家族同样打不穿，模型间解释差异被抓
+
+- 动机：E12.5 结论「k3 对加深任务饱和」。交叉模型找区分度：同档案 kimi-code
+  （api.kimi.com，同一 key）内切 kimi-for-coding（k2.7 家族）——不是验证模型
+  优劣，是找「哪条模型线能打出 recall<1.0」决定主力评测/门禁模型。
+- 控制变量：同一 2 任务（txn multi-bug+诱饵 / quota 一行差）、n=1、single；
+  仅模型变量（k3 基线数据见 E12.5）。
+- 设施：`bench/run_bench.py <task> --model=kimi-for-coding`；结果文件带 model 标记。
+- 数据（2 任务 × kimi-for-coding，~36K tokens；173s 的 quota 说明非同一模型）：
+
+  | 任务 | 模型 | recall | precision | FP |
+  |---|---|---|---|---|
+  | review_window_quota_slide | kimi-for-coding | 1.0 | 1.0 | 0 |
+  | review_txn_dedupe_flush | kimi-for-coding | 1.0 | 1.0 | 0 |
+
+- 结论：
+  1. **k2.7 家族同样饱和**：两个加深任务 recall/precision 全 1.0——「天花板」跨
+     模型成立（至少这两档难度下）。找区分度需要更难的注入面（跨文件状态/大仓库/
+     或刻意泄题验证诚实度），堆模型边际收益已很低，模型扫荡到此为止。
+  2. **模型间解释差异**（副产品）：k2.7 在 quota 上报 low「注释描述的缺陷并不
+     存在（受 len(hits)≤limit 限制）」——机理复核：窗口内持续请求时 pop 清理
+     速度跟不上旧戳积攒，虚高保持成立，其质疑不成立。但这条暴露了一个真实
+     风险：**ground truth 注释把机理写在代码里，可能被模型当「注释与实现不符」
+     反咬**；是否把机理注释移出代码（只留 diff 符号）列为后续任务设计选项。
+- 副产品 2（成本观察）：kimi-for-coding 单任务 13-23K tokens、2-3 倍于 k3
+  耗时——高成本模型不适合做主力评测扫荡，适合做「终审复核」档。
+- 可复现：上面两条命令（--model=kimi-for-coding）。
