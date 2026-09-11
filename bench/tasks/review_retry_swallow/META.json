@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "medium",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "silent-failure",
+      "path": "fetcher.py",
+      "lines": [
+        19,
+        19
+      ],
+      "description": "重试耗尽后静默返回 None 而非抛 FetchError：调用方无法区分失败与正常返回 None"
+    }
+  ]
+}

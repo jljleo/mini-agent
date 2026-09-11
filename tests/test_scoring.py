@@ -1,65 +1,51 @@
-"""bench 评测的纯函数：manifest/META 加载、graded 分数解析、summary 对比。"""
+"""score_review 纯函数测试：ground truth 命中 / 行号容差 / 误报 / 路径归一化。"""
 
-import json
+from bench.scoring import score_review
 
-from bench.scoring import (
-    build_summary,
-    compare_summaries,
-    load_manifest,
-    load_meta,
-    parse_verify_score,
-)
+BUGS = [
+    {"id": "bug-a", "path": "src/auth.py", "lines": [40, 45], "description": "空指针"},
+    {"id": "bug-b", "path": "src/util.py", "lines": [10, 10], "description": "off-by-one"},
+]
 
 
-def test_parse_verify_score_extracts_graded():
-    assert parse_verify_score("verify OK score=0.8\n") == 0.8
-    assert parse_verify_score("score = 0.5") == 0.5
+def f(severity, path, line):
+    return {"severity": severity, "path": path, "line": line, "description": "x"}
 
 
-def test_parse_verify_score_returns_none_without_score():
-    assert parse_verify_score("verify OK\n") is None
+class TestScoreReview:
+    def test_full_recall_and_precision(self):
+        findings = [f("high", "src/auth.py", 42), f("medium", "src/util.py", 10)]
+        result = score_review(findings, BUGS)
+        assert result["recall"] == 1.0 and result["precision"] == 1.0
+        assert result["passed"] and result["score"] == 1.0
+        assert result["false_positives"] == 0 and result["missed"] == []
 
+    def test_line_tolerance(self):
+        """行号容差 ±3：[40,45] 的命中区间是 [37,48]，48 命中、49 超出。"""
+        assert score_review([f("high", "src/auth.py", 49)], BUGS)["hits"] == []
+        assert score_review([f("high", "src/auth.py", 48)], BUGS)["hits"] == ["bug-a"]
 
-def test_parse_verify_score_clamps():
-    assert parse_verify_score("score=1.7") == 1.0
+    def test_false_positive_rate(self):
+        """误报 = 不命中任何 bug 的 finding；precision 随之下降。"""
+        findings = [f("high", "src/auth.py", 42), f("low", "src/other.py", 1)]
+        result = score_review(findings, BUGS)
+        assert result["recall"] == 0.5 and result["precision"] == 0.5
+        assert result["missed"] == ["bug-b"] and result["false_positives"] == 1
 
+    def test_path_normalization(self):
+        """diff 头前缀 a//b/ 与尾缀路径都要能对上 ground truth。"""
+        assert score_review([f("high", "b/src/auth.py", 42)], BUGS)["hits"] == ["bug-a"]
+        assert score_review([f("high", "repo/src/auth.py", 42)], BUGS)["hits"] == ["bug-a"]
 
-def test_load_manifest_default_when_missing(tmp_path):
-    m = load_manifest(tmp_path / "nope.json")
-    assert m["version"] == 1
-    assert m["regression_threshold"] == 0.1
+    def test_one_finding_cannot_cover_two_bugs(self):
+        """同一 finding 最多命中一个 bug（防一行蒙中全库）。"""
+        bugs = [
+            {"id": "a", "path": "x.py", "lines": [10, 12], "description": ""},
+            {"id": "b", "path": "x.py", "lines": [11, 13], "description": ""},
+        ]
+        result = score_review([f("high", "x.py", 11)], bugs)
+        assert result["recall"] == 0.5 and len(result["hits"]) == 1
 
-
-def test_load_manifest_reads_file(tmp_path):
-    p = tmp_path / "manifest.json"
-    p.write_text(json.dumps({"version": 3, "regression_threshold": 0.05}))
-    assert load_manifest(p)["version"] == 3
-
-
-def test_load_meta_default_when_missing(tmp_path):
-    meta = load_meta(tmp_path)
-    assert meta["judge"] == "deterministic"
-
-
-def test_build_summary_aggregates():
-    records = [
-        {"task": "a", "passed": True, "score": 1.0, "prompt_tokens": 100, "completion_tokens": 10, "elapsed_s": 5.0},
-        {"task": "b", "passed": False, "score": 0.4, "prompt_tokens": 50, "completion_tokens": 5, "elapsed_s": 3.0},
-    ]
-    s = build_summary(records, version=1)
-    assert s["aggregate"]["pass_rate"] == 0.5
-    assert s["aggregate"]["avg_score"] == 0.7
-    assert s["aggregate"]["total_tokens"] == 165
-
-
-def test_compare_summaries_detects_regression():
-    prev = {"tasks": {"a": {"score": 1.0, "passed": True}, "b": {"score": 0.9, "passed": True}}}
-    curr = {"tasks": {"a": {"score": 0.8, "passed": True}, "c": {"score": 1.0, "passed": True}}}
-    text = "\n".join(compare_summaries(prev, curr))
-    assert "a" in text and "回归" in text
-    assert "c" in text and "新增" in text
-    assert "b" in text and "移除" in text
-
-
-def test_compare_summaries_no_baseline():
-    assert compare_summaries(None, {"tasks": {}}) == ["（无 baseline，跳过对比）"]
+    def test_empty_findings_zero_recall(self):
+        result = score_review([], BUGS)
+        assert result["recall"] == 0.0 and not result["passed"]

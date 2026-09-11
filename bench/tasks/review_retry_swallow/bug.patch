@@ -1,0 +1,10 @@
+diff --git a/fetcher.py b/fetcher.py
+index 0fd9095..450a83f 100644
+--- a/fetcher.py
++++ b/fetcher.py
+@@ -16,4 +16,4 @@ def fetch_with_retry(fetch, attempts: int = 3, backoff: float = 0.5):
+         except Exception as e:  # noqa: BLE001 — 重试语义要求捕获一切
+             last_error = e
+             time.sleep(backoff * (2 ** i))
+-    raise FetchError(f"重试 {attempts} 次后仍失败") from last_error
++    return None  # 重试耗尽

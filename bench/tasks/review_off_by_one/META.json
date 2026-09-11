@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "easy",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "last-item-dropped",
+      "path": "paginate.py",
+      "lines": [
+        8,
+        8
+      ],
+      "description": "off-by-one：len(items)-1 导致最后一页的最后一项被丢弃"
+    }
+  ]
+}

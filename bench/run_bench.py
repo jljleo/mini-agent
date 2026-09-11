@@ -6,10 +6,17 @@
     python bench/run_bench.py --compare       # 跑完后与 baseline 对比回归
 
 任务结构（bench/tasks/<name>/）：
-    workspace/   agent 的工作区，会被复制到独立临时目录
-    PROMPT.md    发给 agent 的任务描述
-    META.json    任务元数据：judge 类型（deterministic/graded/llm-judge）、rubric 等
+    workspace/   agent 的工作区，会被复制到独立临时目录（chat 任务）
+    PROMPT.md    发给 agent 的任务描述（chat 任务）
+    META.json    任务元数据：judge 类型（deterministic/graded/llm-judge）、rubric 等；
+                 type=review 的任务无 PROMPT.md，改为 base/ + bug.patch + ground truth
     verify.py    判分脚本（deterministic/graded 任务；llm-judge 任务不需要）
+
+review 任务结构（type=review，review 模式的地面真值评测）：
+    base/        干净代码（提交 1）
+    bug.patch    注入的 bug（提交 2，git apply；人可审计的单文件 bug 视图）
+    META.json    type=review + bugs ground truth 清单（id/path/lines/description）
+    评测语义：agent 不知道 bug 存在（与 fix_* 的「被告知去修」相反）——检出率/误报率
 
 评分三层：
     deterministic：verify.py exit 0 = pass
@@ -42,21 +49,23 @@ from bench.scoring import (  # noqa: E402
     load_manifest,
     load_meta,
     parse_verify_score,
+    score_review,
 )
+from mini_agent import review as review_pipeline  # noqa: E402
 from mini_agent.eval.judge import judge, make_client  # noqa: E402
 from mini_agent.eval.trace import TraceRecorder  # noqa: E402
 from mini_agent.kernel.agent import ChatSession  # noqa: E402
 
 
 def discover_tasks(only: str | None = None) -> list[Path]:
-    """发现任务目录：含 PROMPT.md 的即算任务。
+    """发现任务目录：含 PROMPT.md（chat 任务）或 META type=review（review 任务）。
 
     verify.py 按需存在：deterministic / graded 任务必须有，llm-judge 任务
     （META.json 里 judge=llm-judge）没有 verify.py——产出是对话正文，判分走 judge.py。
     """
     tasks = sorted(
         d for d in TASKS_DIR.iterdir()
-        if d.is_dir() and (d / "PROMPT.md").exists()
+        if d.is_dir() and ((d / "PROMPT.md").exists() or load_meta(d).get("type") == "review")
     )
     if only:
         tasks = [d for d in tasks if d.name == only]
@@ -177,6 +186,60 @@ def apply_edit_mode(mode: str) -> None:
 EDIT_MODE: str = "lenient"
 
 
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-c", "user.email=bench@bench", "-c", "user.name=bench", *args],
+        cwd=root, check=True, capture_output=True,
+    )
+
+
+def run_review_task(task_dir: Path, meta: dict) -> dict:
+    """review 任务：base/ + bug.patch 在沙箱重建两提交仓库 → review → 对照 ground truth。
+
+    与 chat 任务的差异：无 PROMPT 无对话轮——review 管道自带 prompt；判分不靠
+    verify.py 而靠 META 的 bugs 清单（确定性：path 匹配 + 行号区间）。
+    """
+    sandbox = Path(tempfile.mkdtemp(prefix=f"bench_{task_dir.name}_"))
+    shutil.copytree(task_dir / "base", sandbox, dirs_exist_ok=True)
+    _git(sandbox, "init", "-q")
+    _git(sandbox, "add", ".")
+    _git(sandbox, "commit", "-qm", "base")
+    _git(sandbox, "apply", str(task_dir / "bug.patch"))
+    _git(sandbox, "add", ".")
+    _git(sandbox, "commit", "-qm", "feature")
+
+    saved_root = tools.PROJECT_ROOT
+    saved_confirm = tools.confirm
+    saved_repo_root = repo_map._IGNORED_ROOT
+    tools.PROJECT_ROOT = str(sandbox)
+    tools.confirm = lambda *args, **kwargs: True
+    repo_map._IGNORED_ROOT = str(sandbox)
+    session = None
+    try:
+        raw, findings, session = review_pipeline.run_review(
+            meta.get("spec", "HEAD"), root=str(sandbox))
+    except Exception as e:
+        print(f"[bench] review 异常中断: {type(e).__name__}: {e}", file=sys.stderr)
+        raw, findings = "", []
+    finally:
+        tools.PROJECT_ROOT = saved_root
+        tools.confirm = saved_confirm
+        repo_map._IGNORED_ROOT = saved_repo_root
+
+    findings_dicts = [f.__dict__ for f in findings]
+    scoring = score_review(findings_dicts, meta.get("bugs", []))
+    return {
+        "task": task_dir.name,
+        **scoring,
+        "findings": findings_dicts,
+        "raw": raw,
+        "prompt_tokens": session.total_prompt_tokens if session else 0,
+        "completion_tokens": session.total_completion_tokens if session else 0,
+        "sandbox": str(sandbox),
+        "messages": [],  # review 会话是只读短流程，不落消息体（结果文件体积控制）
+    }
+
+
 def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
     """单任务全流程：复制工作区 → 沙箱内跑 agent（带 trace）→ 分层判分 → 返回记录。"""
     sandbox = Path(tempfile.mkdtemp(prefix=f"bench_{task_dir.name}_"))
@@ -245,9 +308,14 @@ def main() -> None:
     for task_dir in tasks:
         meta = load_meta(task_dir)
         judge_type = meta.get("judge", "deterministic")
+        is_review = meta.get("type") == "review"
         print(f"[bench] ▶ {task_dir.name} [{judge_type}]")
         started = time.time()
-        record, recorder = run_task(task_dir, meta)
+        if is_review:
+            record = run_review_task(task_dir, meta)
+            recorder = None
+        else:
+            record, recorder = run_task(task_dir, meta)
         record["elapsed_s"] = round(time.time() - started, 1)
         record["group"] = group  # A/B 对照：map / nomap
         record["model"] = MODEL_IN_USE  # 评测模型（跨模型样本可区分）
@@ -257,8 +325,9 @@ def main() -> None:
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = RESULTS_DIR / f"{task_dir.name}-{ts}-{group}.json"
         out.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-        trace_out = RESULTS_DIR / f"{task_dir.name}-{ts}-{group}.trace.jsonl"
-        trace_out.write_text(recorder.to_jsonl(), encoding="utf-8")
+        if recorder is not None:
+            trace_out = RESULTS_DIR / f"{task_dir.name}-{ts}-{group}.trace.jsonl"
+            trace_out.write_text(recorder.to_jsonl(), encoding="utf-8")
 
         mark = "✅ PASS" if record["passed"] else "❌ FAIL"
         tokens = record["prompt_tokens"] + record["completion_tokens"]

@@ -1,0 +1,13 @@
+diff --git a/profile.py b/profile.py
+index 392ca9f..3408cc8 100644
+--- a/profile.py
++++ b/profile.py
+@@ -3,8 +3,6 @@
+ 
+ def display_name(user: dict | None) -> str:
+     """展示名：匿名用户显示「访客」，否则取昵称，无昵称回退邮箱前缀。"""
+-    if user is None:
+-        return "访客"
+     nickname = user.get("profile", {}).get("nickname", "").strip()
+     if nickname:
+         return nickname

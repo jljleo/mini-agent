@@ -36,6 +36,51 @@ def parse_verify_score(stdout: str) -> float | None:
         return None
 
 
+def _path_match(finding_path: str, bug_path: str) -> bool:
+    """findings 里的路径与 ground truth 对齐：剥 diff 头可能带入的 a//b/ 前缀，
+    允许尾缀匹配（模型可能输出仓库相对路径而 ground truth 是子目录相对）。"""
+    norm = finding_path.removeprefix("a/").removeprefix("b/")
+    return norm == bug_path or norm.endswith("/" + bug_path)
+
+
+def score_review(findings: list[dict], bugs: list[dict], line_tolerance: int = 3) -> dict:
+    """review 任务判分（纯函数）：findings 对照 ground truth bugs。
+
+    命中 = 路径匹配且行号落在 bug 行区间 ±line_tolerance（模型定位允许小偏差）；
+    同一 finding 最多命中一个 bug（先匹配先得）。
+    返回 score=recall（主指标），precision/hits/missed 供分析。
+    """
+    used: set[int] = set()
+    hits, missed = [], []
+    for bug in bugs:
+        lo, hi = bug["lines"]
+        hit_idx = None
+        for i, f in enumerate(findings):
+            if i in used or not _path_match(f["path"], bug["path"]):
+                continue
+            if lo - line_tolerance <= f["line"] <= hi + line_tolerance:
+                hit_idx = i
+                break
+        if hit_idx is None:
+            missed.append(bug["id"])
+        else:
+            used.add(hit_idx)
+            hits.append(bug["id"])
+    false_positives = [f for i, f in enumerate(findings) if i not in used]
+    recall = len(hits) / len(bugs) if bugs else 1.0
+    precision = (len(findings) - len(false_positives)) / len(findings) if findings else 1.0
+    return {
+        "score": recall,
+        "passed": recall >= 0.5,
+        "method": "review-ground-truth",
+        "recall": round(recall, 3),
+        "precision": round(precision, 3),
+        "hits": hits,
+        "missed": missed,
+        "false_positives": len(false_positives),
+    }
+
+
 def build_summary(records: list[dict], version: int) -> dict:
     """把任务结果记录汇总成 summary：每任务分数 + 聚合指标。"""
     tasks = {}

@@ -87,13 +87,15 @@ def _final_text(session: ChatSession) -> str:
     return ""
 
 
-def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = True,
-           root: str | None = None) -> int:
-    """跑一轮 review，返回 exit code（默认 high findings → 1，CI 门禁语义）。"""
+def run_review(spec: str | None = None, *, root: str | None = None,
+               render: bool = False) -> tuple[str, list[Finding], ChatSession | None]:
+    """跑一轮 review，返回 (终稿原文, 结构化 findings, session)。无变更返回 ("", [], None)。
+
+    输出与 exit code 由调用侧决定：CLI（review()）渲染+门禁；bench 取数据判分。
+    """
     diff_text = gitdiff.collect(spec, root=root)
     if diff_text == "（无变更）":
-        print("无变更，跳过 review")
-        return 0
+        return "", [], None
 
     tools = get_tool_schemas(config.SUBAGENT_TYPES["researcher"]["tools"])
     session = ChatSession(tools=tools, set_provider=False)
@@ -109,21 +111,29 @@ def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = T
                 return
             yield ev
 
-    quiet = fmt == "json"
-    if quiet:
-        # json 模式：stdout 只出 JSON；内核告警走 stderr，不污染机器输出
+    if render:
+        # 文本模式：工具调用与 findings 流式渲染（本地可读、CI log 友好）
+        ui.consume(capped(events))
+    else:
+        # 静默模式：内核告警走 stderr，不污染调用侧的结构化输出
         for ev in capped(events):
             if isinstance(ev, Warn):
                 print(f"⚠ {ev.message}", file=sys.stderr)
-    else:
-        # 文本模式：工具调用与 findings 流式渲染（本地可读、CI log 友好）
-        ui.consume(capped(events))
 
     raw = _final_text(session)
-    findings = parse_findings(raw)
+    return raw, parse_findings(raw), session
+
+
+def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = True,
+           root: str | None = None) -> int:
+    """CLI 壳：跑一轮 review，返回 exit code（默认 high findings → 1，CI 门禁语义）。"""
+    raw, findings, session = run_review(spec, root=root, render=(fmt == "text"))
+    if session is None:
+        print("无变更，跳过 review")
+        return 0
     high = sum(f.severity == "high" for f in findings)
 
-    if quiet:
+    if fmt == "json":
         print(json.dumps({
             "spec": spec or "HEAD",
             "counts": {s: sum(f.severity == s for f in findings) for s in ("high", "medium", "low")},

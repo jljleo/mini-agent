@@ -351,3 +351,38 @@ fix_dedupe_obf）；模型 k2.7-code、map 组、同批次串行 ×3/每组。
 **诚实边界**：单样本、非计划、无对照，不得用于任何纵向/横向对比结论。
 唯一正面价值：作为重构后的端到端冒烟——包结构改动未破坏 bench 全链路
 （沙箱替换/工具执行/judge 判分/trace 落盘均正常）。
+
+---
+
+## 15. Review 模式基线首秀：注入 bug 检出率（【E8】）
+
+**动机**：R2 第一片——review 模式（agent 不知道 bug 存在）的基线检出率/误报率。
+回答「单通道双轴 review 基线到底什么水平」，后续一切增强（并行通道/多轮深挖）
+都以此为对照组。
+
+**设施**：3 个注入 bug 任务（review_off_by_one / review_retry_swallow /
+review_missing_guard，base/ + bug.patch + META ground truth 行区间）；
+判分 score_review：path 匹配 + 行号落区间 ±3，score=recall。模型 k3（kimi-code），
+单样本/任务。
+
+**数据**：
+
+| 任务 | 难度 | recall | precision | FP | tokens |
+|---|---|---|---|---|---|
+| review_off_by_one | easy | 1.0 | 1.0 | 0 | 8,031 |
+| review_retry_swallow | medium | 1.0 | 0.33 | 2 | 11,767 |
+| review_missing_guard | medium | 1.0 | 1.0 | 0 | 7,265 |
+
+**结论（诚实边界：单样本、任务小而简单、无对照）**：
+1. 基线检出率 3/3——小 diff 单 bug 场景下 k3 的 review 检出没有悬念；
+   有区分度的任务（多 bug、大 diff、误导性变更）是下一批任务的方向。
+2. **副产品（本次评测抓到的设计问题）：误报的语义需要细化。**
+   review_retry_swallow 的 2 条「FP」其实是注入 bug 的合理派生观察（docstring 未
+   同步、FetchError 变死代码）——确定性判分把「ground truth 之外」一律记为误报，
+   但 review 的价值产出不止精确命中。下一迭代：ground truth 支持可接受的派生
+   finding 白名单，或 FP 判定加一道 judge。「真 FP」与「有效但不在清单内」必须区分，
+   否则 precision 指标会惩罚好的 review。
+3. token 成本约 7-12K/任务（diff 小、上下文少）——大 diff 任务的成本曲线待测。
+
+**可复现**：`.venv/bin/python bench/run_bench.py review_off_by_one`（任务级幂等，
+base/ + bug.patch 确定性重建沙箱）。

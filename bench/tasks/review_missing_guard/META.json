@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "type": "review",
+  "category": "review",
+  "difficulty": "medium",
+  "judge": "deterministic",
+  "spec": "HEAD",
+  "bugs": [
+    {
+      "id": "none-guard-removed",
+      "path": "profile.py",
+      "lines": [
+        6,
+        6
+      ],
+      "description": "删除了 user is None 的防护：匿名用户触发 AttributeError，与 docstring 承诺矛盾"
+    }
+  ]
+}
