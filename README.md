@@ -49,6 +49,13 @@ review 是一个确定性管道，不是一句 prompt：
 底座是一个完整的 coding agent 内核：三级上下文压缩、工具分档发现、类型化子 agent、
 权限裁决、benchmark 评测（见「项目结构」）。
 
+## CI 集成
+
+review 是宿主无关的批处理命令，任何 CI 都能接入（exit code 门禁 / `--format json` 机器消费）。
+本仓库自带的 GitHub Actions 示例见 `.github/workflows/review.yml`：PR 上自动 review
+并把 findings 评论到 PR——它同时是本项目的 dogfood 闭环（用 PR 自己的代码 review 自己）。
+需要配置 `KIMI_CODE_API_KEY` secret。
+
 ## 开发
 
 ```bash

@@ -1,0 +1,56 @@
+# PR 自动 code review：mini-agent dogfood 闭环（路径 A：CI 触发，人不主动发起）
+#
+# 每个 PR 用 PR 自己的代码 review 自己的 diff（自举）：
+#   pip install . 安装的是 PR 分支的 mini-agent，review 对象也是这个 PR——
+#   改坏了 review 能力的 PR 会立刻体现在自己的 review 质量里。
+#
+# 需要在仓库 Settings → Secrets 配置 KIMI_CODE_API_KEY。
+# 设计决策：
+#   - --no-fail：当前阶段 review 是信息性评论，不阻塞合并（precision 未被充分
+#     证明前不做门禁；E8-E10 的误报数据够格后再去掉这个 flag）
+#   - fork PR 跳过（secrets 不可用，也防外部 PR 烧 key）
+#   - concurrency cancel：force-push 时取消过期的 review
+
+name: review
+
+on:
+  pull_request:
+
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      pull-requests: write  # gh pr comment 需要（默认 token 在某些仓库设置下只读）
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # review 需要 base...HEAD 的完整祖先
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install mini-agent（PR 自己的代码）
+        run: pip install .
+
+      - name: Review PR diff
+        env:
+          KIMI_CODE_API_KEY: ${{ secrets.KIMI_CODE_API_KEY }}
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          {
+            echo "## 🤖 mini-agent review"
+            echo
+            mini-agent review "origin/${{ github.base_ref }}...HEAD" --no-fail || true
+          } > review.md
+
+      - name: Comment findings
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file review.md
