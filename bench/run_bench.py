@@ -189,6 +189,46 @@ EDIT_MODE: str = "lenient"
 REVIEW_MODE: str = "single"
 
 
+# ---- 旋钮注入（--knob=name:value，A/B 档位扫描；与 --review-mode 同族机制）----
+
+KNOB: str = "none"
+
+
+def apply_knob(knob: str) -> None:
+    """实验旋钮注入：不碰产品代码，bench 侧覆盖生效点。
+
+    支持档位：
+        compress:baseline  触发线 = CTX-28K（现状；kimi-code 1M 窗口下评测任务不触发）
+        compress:60k       触发线 = 60K（收紧到任务规模量级，强制 L3/L2/L1 真实触发）
+        compress:120k      触发线 = 120K（接近 packaging 级大任务的次上限）
+        repomap:<int>      repo map 字符预算（agent.REPO_MAP_MAX_CHARS，
+                           与 apply_group 的同类 patch 手法）
+    """
+    global KNOB
+    import led_review.config as config
+    import led_review.kernel.agent as agent
+    if knob.startswith("compress:"):
+        mode = knob.split(":", 1)[1]
+        # 1M 窗口下按 CTX 比例的档位对 ≤120K 评测任务永不触发（E 旋钮实验观测），
+        # 给绝对触发线才有杠杆：60K/120K 是「人为收紧窗口」的压力测试
+        levels = {"baseline": config.CONTEXT_TOKENS - 28_000, "60k": 60_000, "120k": 120_000}
+        if mode not in levels:
+            sys.exit(f"--knob=compress: 取值 baseline|60k|120k，收到: {mode}")
+        high = levels[mode]
+        overrides = {"truncate_high_tokens": high, "truncate_low_tokens": int(high * 0.6)}
+        orig = agent.get_profile
+        agent.get_profile = lambda name, o=orig, ov=overrides: {**o(name), **ov}
+    elif knob.startswith("repomap:"):
+        try:
+            chars = int(knob.split(":", 1)[1])
+        except ValueError:
+            sys.exit(f"--knob=repomap: 需要整数，收到: {knob}")
+        agent.REPO_MAP_MAX_CHARS = chars
+    else:
+        sys.exit(f"--knob= 支持 compress:<baseline|60k|120k> | repomap:<int>，收到: {knob}")
+    KNOB = knob
+
+
 def _git(root: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-c", "user.email=bench@bench", "-c", "user.name=bench", *args],
@@ -257,8 +297,10 @@ def run_review_task(task_dir: Path, meta: dict) -> dict:
         "raw": raw,
         "prompt_tokens": sum(s.total_prompt_tokens for s in sessions),
         "completion_tokens": sum(s.total_completion_tokens for s in sessions),
+        "cached_tokens": sum(s.total_cached_tokens for s in sessions),
         "sandbox": str(sandbox),
         "review_mode": REVIEW_MODE,
+        "knob": KNOB,
         "messages": [],  # review 会话是只读短流程，不落消息体（结果文件体积控制）
     }
 
@@ -293,6 +335,7 @@ def run_task(task_dir: Path, meta: dict) -> tuple[dict, TraceRecorder]:
         **scoring,
         "prompt_tokens": session.total_prompt_tokens if session else 0,
         "completion_tokens": session.total_completion_tokens if session else 0,
+        "cached_tokens": session.total_cached_tokens if session else 0,
         "sandbox": str(sandbox),
         "messages": session.messages if session else [],
     }
@@ -318,9 +361,13 @@ def main() -> None:
     if REVIEW_MODE not in ("single", "parallel"):
         sys.exit(f"--review-mode= 取值 single|parallel，收到: {REVIEW_MODE}")
 
+    knob = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                 if a.startswith("--knob=")), "none")
+
     apply_group(group)
     apply_model(model)
     apply_edit_mode(edit_mode)
+    apply_knob(knob)
 
     manifest = load_manifest(TASKS_DIR / "manifest.json")
     tasks = discover_tasks(only)
