@@ -356,6 +356,8 @@ def main() -> None:
         sys.exit(f"--group= 取值 map|nomap，收到: {group}")
     model = next((a.split("=", 1)[1] for a in sys.argv[1:]
                   if a.startswith("--model=")), None)
+    profile = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                    if a.startswith("--profile=")), None)
     edit_mode = next((a.split("=", 1)[1] for a in sys.argv[1:]
                       if a.startswith("--edit-mode=")), "lenient")
     if edit_mode not in ("lenient", "strict"):
@@ -371,6 +373,15 @@ def main() -> None:
 
     apply_group(group)
     apply_model(model)
+    if profile:
+        global MODEL_IN_USE
+        import led_review.config as config
+        try:
+            config.apply_profile(profile)
+        except KeyError:
+            sys.exit(f"--profile= 档案不存在: {profile}")
+        MODEL_IN_USE = f"{profile}" if not model else model
+        print(f"[bench] 模型档案: {profile} → {config.MODEL}")
     apply_edit_mode(edit_mode)
     apply_knob(knob)
 
