@@ -779,3 +779,31 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
 - 副产品：无内核缺陷（保险丝按设计工作；问题在触发线的任务适配，不在代码）。
 - 可复现：`bench/run_bench.py review_oss_packaging_ranges --knob=compress:60k`
   （×2 复现熔断）；`--knob=compress:120k`（对照）；样本在 results/*-*60k*/120k*.json
+
+---
+
+### 【E14】2026-09-12 旋钮调优②：repo map 预算（REPO_MAP_MAX_CHARS）
+
+- 动机：预算 3000 是否检出约束？1500/6000 是否省钱或掉检出？→「预算旋钮有没有杠杆」。
+- 控制变量：模型 k3、group=map、single；只操纵 REPO_MAP_MAX_CHARS（--knob=repomap:<int>）；
+  3000=基线（E12.9 历史/E13 盘）。
+- 设施：txn_dedupe_flush（合成）、oss_mapstructure（OSS 小）、oss_packaging（OSS 大仓库）3 探针。
+- 数据：
+
+| 探针 | 1500 | 3000（基线） | 6000 |
+|---|---|---|---|
+| txn_dedupe_flush | 1.0 / 9.4K | 1.0 / 9.4K（E13） | 1.0 / **5.3K** |
+| oss_mapstructure | 1.0 / 21K | 1.0 / 9-14K（E12.9） | 1.0 / 34K |
+| oss_packaging | 1.0 / 95K | 1.0 / 96-117K（E12.9） | 未跑（省成本） |
+
+- 结论：
+  1. **预算 1500-6000 区间对检出率零影响（6/6 全检出）**。成本变化方向不一：
+     txn@6000 反而省（5.3K vs 9.4K）、mapstructure@6000 更贵（34K vs 9-14K）、
+     packaging 无感（95K ≈ 基线）——没有单调、没有可套利档。
+  2. 解释：合成/OSS 级仓库的 map 总量大多 < 1500 字符（塞不满预算），cut 从未
+     发生或只削尾部低价值符号——预算不是当前约束面。
+  3. **可操作推论**：a) 保守下调 REPO_MAP_MAX_CHARS 到 1500 无检出代价（省
+     prompt 空间）；b) 大仓库方向的真缺口是**语义召回**（diff 相关文件的定向
+     注入），不是预算——预算旋钮在本任务库无杠杆，别再为它花评测预算。
+- 副产品：无。
+- 可复现：`bench/run_bench.py <task> --knob=repomap:<1500|6000> --group=map`。
