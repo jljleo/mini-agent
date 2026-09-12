@@ -840,3 +840,26 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
   为 strong 旋钮缺陷（bench 已把异常降级为 0 tokens FAIL，无配额区分字段；
   改进候选：bench 结果加 error 字段记录异常原因）。
 - 可复现：`bench/run_bench.py <task> --knob=prompt:strong`（配额恢复后）。
+
+### 【E15 补跑】2026-09-12 prompt:strong 跨模型收尾（配额恢复后）
+
+- 配额实况：kimi-code（coding 端点）月配额 403 未恢复；moonshot 端点
+  kimi-k2.7-code 配额可用 → bench 新增 `--profile=`（跨端点切档案，model
+  标记同步）后用 k2.7-code 补跑被截断的两探针。**跨模型标注：与 k3 基线
+  的对照仅作稳定性参考，非同模型 A/B**（先例：E12.6 k2.7 交叉）。
+- 补跑数据：
+
+| 探针 | strong @ k2.7-code | k3 baseline（历史） |
+|---|---|---|
+| oss_mapstructure | **1.0** / 32.9K / 99s | 1.0 / 9-14K |
+| session_ttl_scale | **1.0** / 9.0K / 25s | 1.0（E12.7） |
+
+- E15 最终结论（4 探针 = txn/quota @k3 + mapstructure/session_ttl @k2.7-code）：
+  1. **strong 输出规格在双模型、全部四类探针（合成/OSS/跨文件）下不损检出
+     与定位（4/4 score 1.0）**。score 已含定位判分（zones）——E12.8 的
+     「可接受定位」欠账未在本批再现，也无回退。
+  2. 未见可量化的定位增益（本批无 docstring 定位欠账样本），故「strong 提升
+     定位」的假设未被直接证实、也未被证伪；strong 作为低成本零回归的候选可
+     进入正式 prompt——建议留作 config 可切换，不急着替换基线。
+- 副产品：--profile= 参数（跨端点评测基建）；0 tokens 失败的三次归因全程
+  记录（配额 403，非模型行为）。
