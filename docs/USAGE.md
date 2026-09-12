@@ -539,6 +539,8 @@ led install-hook --pre-commit       # 可选：commit 前也 review
 ## 14. 发布与上线（作者视角）
 
 led 对外是 PyPI 包 `led-review` + GitHub Action `jljleo/led-review@v1`。
+**当前已发布：v0.1.1（PyPI，wheel 含 led_review 包；0.1.0 曾因含旧包名重发过）**。
+
 首次上线（一次性，非代码工作）：
 
 1. 注册 https://pypi.org（发布者账号）
@@ -547,12 +549,12 @@ led 对外是 PyPI 包 `led-review` + GitHub Action `jljleo/led-review@v1`。
 4. 打版本 tag 触发 `.github/workflows/publish.yml`：
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0     # → PyPI 发布 led-review
-git tag v1 && git push origin v1              # → Action 引用点（major tag 可移动）
+git tag vX.Y.Z && git push origin vX.Y.Z     # → PyPI 发布 led-review
+git tag -f v1 && git push -f origin v1      # → 移动 major tag（Action 跟随）
 ```
 
-日常发版：改 `pyproject.toml` 版本号 → 打新 tag（如 v0.1.1）→ 移动 `v1` tag
-指向最新（`git tag -f v1 && git push -f origin v1`）。
+日常发版：改 `pyproject.toml` 版本号 → 提交 → 打新 tag → 移动 `v1`。
+批量发版脚本等价于：`git tag vX.Y.Z && git push origin vX.Y.Z && git tag -f v1 && git push -f origin v1`。
 
 > 顺序约束：PyPI 发布在前（Action 的 `pip install led-review` 依赖包已存在）；
 > 本仓库自身的 dogfood action 用 `install_from: "."` 不受此约束，可先自测。
