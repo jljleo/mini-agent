@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: jljleo/mini-agent@v1
+      - uses: jljleo/led-review@v1
         with:
           api_key: ${{ secrets.KIMI_CODE_API_KEY }}   # BYOK：用户自己的 key
 ```

@@ -15,7 +15,7 @@
 |---|---|---|
 | `review` 子命令 | `led review ...` | **主形态**：非交互批处理，CI 可消费，exit code 门禁 |
 | 交互 REPL | `led`（无子命令） | 辅助形态：人机对话式编码助手 |
-| GitHub Action | `jljleo/mini-agent@v1` | 零操作：PR 自动 review 评论（§12.1） |
+| GitHub Action | `jljleo/led-review@v1` | 零操作：PR 自动 review 评论（§12.1） |
 | 其它平台 CI | 一行命令 | GitLab/Gitea/自建 runner（§12.5） |
 | 本地 hook | `led install-hook` 一次 | commit/push 自动，本地自审（§12.6） |
 
@@ -430,7 +430,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }      # review 需要 base...HEAD 完整祖先
-      - uses: jljleo/mini-agent@v1
+      - uses: jljleo/led-review@v1
         with:
           api_key: ${{ secrets.KIMI_CODE_API_KEY }}   # BYOK
 ```
@@ -538,7 +538,7 @@ led install-hook --pre-commit       # 可选：commit 前也 review
 
 ## 14. 发布与上线（作者视角）
 
-led 对外是 PyPI 包 `led-review` + GitHub Action `jljleo/mini-agent@v1`。
+led 对外是 PyPI 包 `led-review` + GitHub Action `jljleo/led-review@v1`。
 首次上线（一次性，非代码工作）：
 
 1. 注册 https://pypi.org（发布者账号）
