@@ -68,6 +68,29 @@ _REVIEW_HEADER = """请对以下变更做 code review。可以用 read_file / se
 
 {diff}"""
 
+# E15 实验变体：输出规格强制化。与基线的差异——定位纪律（实现位置而非
+# docstring）、每条附复现思路与 confidence 自评。目标是拉高可接受定位率
+# （E12.8：模型把 bug 定位在类 docstring 14 行而非实现键 23 行）。
+_REVIEW_HEADER_STRONG = """请对以下变更做 code review。可以用 read_file / search_symbols / run_bash（只读命令）查看相关代码上下文，但审查对象只是变更本身。
+
+{axes}
+
+输出格式（严格遵守，会被程序解析）：
+- 每个 finding 一行：- [severity] 路径:行号 — 问题描述（severity 只能是 high / medium / low）
+- 【定位纪律】行号必须是问题代码的**实现位置所在行**：字段/语句/分支的具体行；
+  类或函数的 docstring、声明行、调用点都不算（若问题在函数体内，报函数体内
+  实际出错的语句行；宁可少报位置不确定的，也不要报错位置）。
+- 每条 finding 下一行缩进两个空格写：复现：……（一两句话的复现思路或触发条件）
+- 再下一行缩进两个空格写：置信：N/5（N 为 1-5 整数，你对这条 finding 确为
+  真问题的把握，不报 < 3 的条目）
+- 某条需要给修复建议时，再下一行缩进两个空格写：建议：……
+- 确实没有任何问题时，写一行「未发现问题」再写「## 总结」，总结两三句话评价
+  这次变更的整体质量
+
+变更如下：
+
+{diff}"""
+
 # 轴指令（E11 parallel 实验组）：single = 双轴合一基线；correctness / standards =
 # 单轴聚焦 prompt。两轴 prompt 内容互斥——standards 轴不含【正确性】字样（用例区分轴）。
 _AXES: dict[str, tuple[str, str]] = {
@@ -119,10 +142,17 @@ def parse_findings(text: str) -> list[Finding]:
     return findings
 
 
-def build_prompt(diff_text: str) -> str:
-    """单通道基线 prompt：双轴合一（默认形态）。"""
+def build_prompt(diff_text: str, *, strong: bool = False) -> str:
+    """单通道基线 prompt：双轴合一（默认形态）。
+
+    strong=True：E15 实验变体——强制输出规格（实现位置纪律 + 复现思路 +
+    confidence 自评），目标是拉高「可接受定位率」（E12.8 教训：模型会把 bug
+    定位在类 docstring 而非实现键）。
+    """
     axes, no_findings = _AXES["single"]
-    return _REVIEW_HEADER.format(axes=axes, no_findings_line=no_findings, diff=diff_text)
+    if not strong:
+        return _REVIEW_HEADER.format(axes=axes, no_findings_line=no_findings, diff=diff_text)
+    return _REVIEW_HEADER_STRONG.format(axes=axes, diff=diff_text)
 
 
 def build_axis_prompt(diff_text: str, axis: str) -> str:

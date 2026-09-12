@@ -224,8 +224,13 @@ def apply_knob(knob: str) -> None:
         except ValueError:
             sys.exit(f"--knob=repomap: 需要整数，收到: {knob}")
         agent.REPO_MAP_MAX_CHARS = chars
+    elif knob == "prompt:strong":
+        # E15 变体：输出规格强制化（定位纪律 + 复现/置信行），见 review.build_prompt
+        import led_review.review as rv
+        _orig = rv.build_prompt
+        rv.build_prompt = lambda diff, **kw: _orig(diff, strong=True)  # noqa: E731
     else:
-        sys.exit(f"--knob= 支持 compress:<baseline|60k|120k> | repomap:<int>，收到: {knob}")
+        sys.exit(f"--knob= 支持 compress:<baseline|60k|120k> | repomap:<int> | prompt:strong，收到: {knob}")
     KNOB = knob
 
 
