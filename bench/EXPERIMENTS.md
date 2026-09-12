@@ -807,3 +807,36 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
      注入），不是预算——预算旋钮在本任务库无杠杆，别再为它花评测预算。
 - 副产品：无。
 - 可复现：`bench/run_bench.py <task> --knob=repomap:<1500|6000> --group=map`。
+
+---
+
+### 【E15】2026-09-12 旋钮调优③：prompt 变体（strong 输出规格）——配额中断，未完
+
+- 动机：E12.8 教训的正面回应——输出规格强制化（实现位置纪律 + 复现思路 +
+  confidence 自评）能否拉高「可接受定位率」、是否损检出。**本轮核心问题**
+  （定位精度差异）因 API 配额中断未验证，条目就事记录。
+- 控制变量：模型 k3、group=map、single；只操纵 prompt（--knob=prompt:strong，
+  review.build_prompt(strong=True)，独立模板 _REVIEW_HEADER_STRONG，基线零回归）；
+  判分同 E12.5/12.8（txn/quota 的检出与定位）。
+- 设施：4 探针 = txn（合成深 bug）+ quota（合成，E12.8 定位欠账源）+
+  mapstructure（OSS）+ session_ttl（跨文件）。
+- 数据：
+
+| 探针 | strong | baseline（历史） |
+|---|---|---|
+| txn_dedupe_flush | 1.0 / 9.8K / 26s | 1.0 / 9-14K |
+| window_quota_slide | 1.0 / 8.4K / 23s | 1.0 / 8-10K |
+| oss_mapstructure | **未完成**（403 ×2） | 1.0 / 9-14K（E12.9） |
+| session_ttl | **未完成**（403 ×1） | 1.0（E12.7 跨文件） |
+
+- 结论（部分）：
+  1. **strong 不损检出（2/2 合成探针）**；token 与 baseline 同级。
+  2. 定位精度差异（本实验主问题）未验证——两探针被配额故障截断，等配额恢复
+     或换档案补跑后再定论。
+- 副产品（1）：**kimi-code 月配额耗尽（403 access_terminated）**——本日评测
+  ~340K tokens（E13 156K + E14 165K + E15 18K）触发限制。0 tokens 故障样本的
+  原因分类要新增「配额 403」（与基础设施抖动同为非模型行为；两者都需排除/补跑）。
+- 副产品（2）：0 tokens ×3 连续出现时先查 API 配额再怀疑代码——本次差点误判
+  为 strong 旋钮缺陷（bench 已把异常降级为 0 tokens FAIL，无配额区分字段；
+  改进候选：bench 结果加 error 字段记录异常原因）。
+- 可复现：`bench/run_bench.py <task> --knob=prompt:strong`（配额恢复后）。
