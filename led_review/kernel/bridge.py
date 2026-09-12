@@ -15,7 +15,7 @@ import queue
 import threading
 from collections.abc import Callable, Iterator
 
-from mini_agent.kernel.events import TurnControl
+from led_review.kernel.events import TurnControl
 
 _DONE = object()  # 队列哨兵：worker 结束标记（无论正常结束还是异常）
 

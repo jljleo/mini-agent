@@ -9,7 +9,7 @@ TextDelta / ReasoningDelta 逐 chunk 产出，StreamFinished 收尾带回定稿�
 import queue as _queue
 import threading as _threading
 
-from mini_agent.kernel.events import ReasoningDelta, StreamFinished, TextDelta
+from led_review.kernel.events import ReasoningDelta, StreamFinished, TextDelta
 
 
 class StreamAborted(Exception):

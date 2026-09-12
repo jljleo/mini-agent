@@ -19,13 +19,13 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 
-from mini_agent import config
-from mini_agent.kernel.agent import ChatSession
-from mini_agent.kernel.bridge import run_in_thread
-from mini_agent.kernel.events import StreamStart, Warn
-from mini_agent.tools import gitdiff
-from mini_agent.tools.registry import get_tool_schemas
-from mini_agent.ui import renderer as ui
+from led_review import config
+from led_review.kernel.agent import ChatSession
+from led_review.kernel.bridge import run_in_thread
+from led_review.kernel.events import StreamStart, Warn
+from led_review.tools import gitdiff
+from led_review.tools.registry import get_tool_schemas
+from led_review.ui import renderer as ui
 
 # review 会话的轮次保险丝（无人值守保险丝加在调用侧——交互循环无硬上限是刻意设计）。
 # 两档：SOFT 档经 steering 注入「立即收敛输出 findings」（E10：真实仓库的调研轮次

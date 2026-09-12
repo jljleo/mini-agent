@@ -10,8 +10,8 @@ PROJECT_ROOT cwd 下执行（本测试用真实 shell 命令，零网络）。
 
 import pytest
 
-import mini_agent.tools.builtin as tools
-from mini_agent.tools.builtin import edit_file, write_file
+import led_review.tools.builtin as tools
+from led_review.tools.builtin import edit_file, write_file
 
 
 @pytest.fixture

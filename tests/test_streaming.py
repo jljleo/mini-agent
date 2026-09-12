@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mini_agent.kernel.events import ReasoningDelta, StreamFinished, TextDelta, TurnControl
-from mini_agent.kernel.streaming import interruptible_stream, stream_and_assemble
+from led_review.kernel.events import ReasoningDelta, StreamFinished, TextDelta, TurnControl
+from led_review.kernel.streaming import interruptible_stream, stream_and_assemble
 
 
 def tc(index, id=None, type=None, name=None, arguments=None):
@@ -151,7 +151,7 @@ class TestInterruptibleStream:
         """
         import time as _time
 
-        from mini_agent.kernel.streaming import StreamAborted
+        from led_review.kernel.streaming import StreamAborted
 
         control = TurnControl()
 

@@ -7,8 +7,8 @@
 
 import pytest
 
-import mini_agent.tools.builtin as tools
-from mini_agent.tools.builtin import (
+import led_review.tools.builtin as tools
+from led_review.tools.builtin import (
     _check_permission,
     _has_outside_path,
     _resolve_safe_path,

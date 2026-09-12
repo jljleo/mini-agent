@@ -58,11 +58,11 @@ jobs:
 ```bash
 pipx install .
 # 配置 API key：默认档案 kimi-code 需要 KIMI_CODE_API_KEY 环境变量
-# （也可在项目目录放 .env；更多模型档案见 mini_agent/models.default.json）
+# （也可在项目目录放 .env；更多模型档案见 led_review/models.default.json）
 cd 你的项目 && led review HEAD
 ```
 
-从源码运行：`pip install -r requirements.txt` 后 `.venv/bin/python -m mini_agent review HEAD`。
+从源码运行：`pip install -r requirements.txt` 后 `.venv/bin/python -m led_review review HEAD`。
 
 ## 工作原理
 
@@ -107,7 +107,7 @@ review 是宿主无关的批处理命令，任何 CI 都能接入（exit code �
 ## 项目结构
 
 ```
-mini_agent/
+led_review/
 ├── main.py           入口（review 子命令分发 + tty/管道单一主循环）
 ├── review.py         code review 管道（确定性输入→双轴审查→结构化 findings→门禁）
 ├── skills.py         skills 机制（索引常驻注入 + read_file 惰性加载）

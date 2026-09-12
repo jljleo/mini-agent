@@ -26,10 +26,10 @@ dependencies = [
 ]
 
 [project.scripts]
-led = "mini_agent.main:main"
+led = "led_review.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mini_agent"]  # 正经包：models.default.json 作为 package data 自动随包
+packages = ["led_review"]  # 正经包：models.default.json 作为 package data 自动随包
 
 [tool.ruff]
 target-version = "py313"
@@ -46,4 +46,4 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["mini_agent", "bench"]
+known-first-party = ["led_review", "bench"]

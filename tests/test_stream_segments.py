@@ -4,7 +4,7 @@
 未闭合 ``` 或没有空行时一切留在生长中的尾段。
 """
 
-from mini_agent.ui.segments import StreamSegmenter, split_complete
+from led_review.ui.segments import StreamSegmenter, split_complete
 
 
 class TestSplitComplete:

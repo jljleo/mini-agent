@@ -40,9 +40,9 @@ BENCH_DIR = PROJECT_ROOT / "bench"
 TASKS_DIR = BENCH_DIR / "tasks"
 RESULTS_DIR = BENCH_DIR / "results"
 
-import mini_agent.repo_map as repo_map  # noqa: E402
-import mini_agent.tools.builtin as tools  # noqa: E402
-import mini_agent.ui.renderer as ui  # noqa: E402
+import led_review.repo_map as repo_map  # noqa: E402
+import led_review.tools.builtin as tools  # noqa: E402
+import led_review.ui.renderer as ui  # noqa: E402
 from bench.scoring import (  # noqa: E402
     build_summary,
     compare_summaries,
@@ -51,10 +51,10 @@ from bench.scoring import (  # noqa: E402
     parse_verify_score,
     score_review,
 )
-from mini_agent import review as review_pipeline  # noqa: E402
-from mini_agent.eval.judge import judge, make_client  # noqa: E402
-from mini_agent.eval.trace import TraceRecorder  # noqa: E402
-from mini_agent.kernel.agent import ChatSession  # noqa: E402
+from led_review import review as review_pipeline  # noqa: E402
+from led_review.eval.judge import judge, make_client  # noqa: E402
+from led_review.eval.trace import TraceRecorder  # noqa: E402
+from led_review.kernel.agent import ChatSession  # noqa: E402
 
 
 def discover_tasks(only: str | None = None) -> list[Path]:
@@ -139,8 +139,8 @@ def apply_group(group: str) -> None:
     nomap  = 对照组：不注入地图，工具面移除 search_symbols（含常驻声明与
               search_tools 发现入口，模型完全不知道它的存在）——只能 read_file/grep 盲探。
     """
-    import mini_agent.kernel.agent as agent
-    import mini_agent.tools.registry as tool_registry
+    import led_review.kernel.agent as agent
+    import led_review.tools.registry as tool_registry
     if group == "nomap":
         agent.build_repo_map_cached = lambda **kw: ""          # noqa: E731 不注入地图
         tool_registry.TOOLS.pop("search_symbols", None)        # 删除执行体
@@ -156,7 +156,7 @@ def apply_model(model: str | None) -> None:
     """--model= 覆盖评测模型（默认 config.MODEL）。bench 结果带 model 标记。"""
     global MODEL_IN_USE
     if model:
-        import mini_agent.config as config
+        import led_review.config as config
         profile = config.MODEL_PROFILE
         config.MODEL_PROFILES[profile]["model"] = model
         config.apply_profile(profile)
@@ -165,7 +165,7 @@ def apply_model(model: str | None) -> None:
 
 
 def _default_model() -> str:
-    import mini_agent.config as config
+    import led_review.config as config
     return config.MODEL
 
 
@@ -177,7 +177,7 @@ def apply_edit_mode(mode: str) -> None:
     strict = 模拟旧精确时代（容错层失效，L2 永不命中直接进 L3 报错）。
     """
     global EDIT_MODE
-    import mini_agent.tools.builtin as tools
+    import led_review.tools.builtin as tools
     if mode == "strict":
         tools._lenient_replace = lambda *a, **k: None  # noqa: E731 容错链失效
     EDIT_MODE = mode

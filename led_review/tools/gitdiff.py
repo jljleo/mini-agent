@@ -15,7 +15,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 
-import mini_agent.config as config
+import led_review.config as config
 
 # collect() 详情预算：概览之外能放下多少 patch 正文
 DEFAULT_BUDGET_CHARS = 60_000

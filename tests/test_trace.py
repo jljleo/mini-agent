@@ -5,8 +5,8 @@
 
 import json
 
-from mini_agent.eval.trace import TraceRecorder
-from mini_agent.kernel.events import (
+from led_review.eval.trace import TraceRecorder
+from led_review.kernel.events import (
     StreamFinished,
     StreamStart,
     TextDelta,

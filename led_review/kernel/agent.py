@@ -19,8 +19,8 @@ import queue
 
 from openai import OpenAI
 
-import mini_agent.config as config
-from mini_agent.config import (
+import led_review.config as config
+from led_review.config import (
     MAX_SAME_TOOL_CALLS,
     REPO_MAP_MAX_CHARS,
     SESSION_FILE,
@@ -31,7 +31,7 @@ from mini_agent.config import (
     format_tokens,
     get_profile,
 )
-from mini_agent.kernel.compact import (
+from led_review.kernel.compact import (
     apply_message_cap,
     apply_slimming,
     apply_truncation,
@@ -42,7 +42,7 @@ from mini_agent.kernel.compact import (
     extract_middle,
     summarize_middle,
 )
-from mini_agent.kernel.events import (
+from led_review.kernel.events import (
     Note,
     StreamFinished,
     StreamStart,
@@ -53,11 +53,11 @@ from mini_agent.kernel.events import (
     Usage,
     Warn,
 )
-from mini_agent.kernel.streaming import interruptible_stream, stream_and_assemble
-from mini_agent.repo_map import build_repo_map_cached
-from mini_agent.skills import format_skills_index, scan_skills
-from mini_agent.tools.builtin import set_history_provider
-from mini_agent.tools.registry import TOOLS, get_extended_tool_schemas, get_resident_tool_schemas
+from led_review.kernel.streaming import interruptible_stream, stream_and_assemble
+from led_review.repo_map import build_repo_map_cached
+from led_review.skills import format_skills_index, scan_skills
+from led_review.tools.builtin import set_history_provider
+from led_review.tools.registry import TOOLS, get_extended_tool_schemas, get_resident_tool_schemas
 
 # AGENTS.md 自动注入：仓库行为约定（编码规范/架构边界/踩坑清单）作为一条 system 消息
 # 注入在模板后、repo map 前——它是「怎么改代码」的交规，repo map 是「仓库有什么」的

@@ -688,7 +688,7 @@ def build_repo_map_cached(root: str | None = None, max_chars: int = 3000) -> str
 def _default_root() -> str:
     if _IGNORED_ROOT:
         return _IGNORED_ROOT
-    from mini_agent.config import PROJECT_ROOT
+    from led_review.config import PROJECT_ROOT
     return PROJECT_ROOT
 
 

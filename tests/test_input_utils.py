@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from mini_agent.ui.input import read_input
+from led_review.ui.input import read_input
 
 
 class FakeStdin:

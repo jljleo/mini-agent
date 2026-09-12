@@ -7,10 +7,10 @@ import os
 
 import pytest
 
-import mini_agent.commands.builtin as commands
-import mini_agent.kernel.agent as agent
-import mini_agent.tools.builtin as tools
-from mini_agent.commands.builtin import cmd_clear, cmd_compact, cmd_model, cmd_resume
+import led_review.commands.builtin as commands
+import led_review.kernel.agent as agent
+import led_review.tools.builtin as tools
+from led_review.commands.builtin import cmd_clear, cmd_compact, cmd_model, cmd_resume
 
 
 @pytest.fixture(autouse=True)

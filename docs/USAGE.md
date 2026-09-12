@@ -42,8 +42,8 @@ led review main...HEAD           # 在任意 git 仓库目录下使用
 ```bash
 python3.13 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m mini_agent      # 交互 REPL
-.venv/bin/python -m mini_agent review main...HEAD
+.venv/bin/python -m led_review      # 交互 REPL
+.venv/bin/python -m led_review review main...HEAD
 # 本地开发装的命令也是 led（pyproject [project.scripts]）
 .venv/bin/led install-hook
 ```
@@ -70,7 +70,7 @@ export KIMI_CODE_API_KEY=sk-xxx                            # 环境变量
 
 ## 3. 模型档案
 
-模型档案定义在 `mini_agent/models.default.json`（包内随 wheel 分发）；你可以在
+模型档案定义在 `led_review/models.default.json`（包内随 wheel 分发）；你可以在
 项目目录放 `models.json` 覆盖（合并优先）。
 
 | 档案名 | 模型 | 端点 | API key 环境变量 | 上下文 |
@@ -354,8 +354,8 @@ pip install pre-commit && pre-commit install   # 可选钩子
 ### 9.1 调试 review 管道
 
 ```bash
-.venv/bin/python -m mini_agent review HEAD --format json   # 结构化输出
-MINI_AGENT_MODEL=kimi-code-256k .venv/bin/python -m mini_agent review HEAD  # 换档案
+.venv/bin/python -m led_review review HEAD --format json   # 结构化输出
+MINI_AGENT_MODEL=kimi-code-256k .venv/bin/python -m led_review review HEAD  # 换档案
 ```
 
 ### 9.2 常见坑
@@ -373,7 +373,7 @@ MINI_AGENT_MODEL=kimi-code-256k .venv/bin/python -m mini_agent review HEAD  # �
 ## 10. 架构速览（改代码前必读）
 
 ```
-mini_agent/
+led_review/
 ├── main.py        入口：review 子命令分发 / 无子命令进交互主循环
 ├── kernel/        agent 循环、流式、上下文压缩（事件生产者，不 import ui）
 │   └── events.py  TurnControl / StreamStart / TextDelta / Warn 等事件
@@ -496,7 +496,7 @@ steps:
 机器、用用户自己的 key）：
 
 ```bash
-pipx install led-review          # 或源码 .venv/bin/python -m mini_agent
+pipx install led-review          # 或源码 .venv/bin/python -m led_review
 led install-hook                 # 默认 pre-push：push 前自动 review 最近提交
 led install-hook --pre-commit    # 加装 pre-commit：commit 前 review 工作区
 led install-hook --fail-on-high  # 本地门禁：high findings 阻塞 commit/push

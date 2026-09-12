@@ -4,7 +4,7 @@
 文件工具测试惯例：把根目录指向 tmp，不触碰真实项目。
 """
 
-import mini_agent.repo_map as repo_map
+import led_review.repo_map as repo_map
 
 
 def make_project(tmp_path, files: dict[str, str]):
@@ -208,13 +208,13 @@ class TestCacheInvalidation:
 
 class TestToolIntegration:
     def test_registered_and_resident(self):
-        import mini_agent.tools.builtin as tools  # noqa: F401 触发 @tool 注册副作用
-        import mini_agent.tools.registry as tool_registry
+        import led_review.tools.builtin as tools  # noqa: F401 触发 @tool 注册副作用
+        import led_review.tools.registry as tool_registry
         assert "search_symbols" in tool_registry.TOOLS
         assert "search_symbols" in tool_registry.RESIDENT_TOOL_NAMES
 
     def test_tool_respects_project_root_isolation(self, tmp_path, monkeypatch):
-        import mini_agent.tools.builtin as tools
+        import led_review.tools.builtin as tools
         root = make_project(tmp_path, {"mod.py": "class Widget:\n    pass\n"})
         monkeypatch.setattr(tools, "PROJECT_ROOT", str(root))
         out = tools.search_symbols("widget")
@@ -222,8 +222,8 @@ class TestToolIntegration:
 
     def test_agent_injects_repo_map(self, tmp_path, monkeypatch):
         """ChatSession 构造后应带一条 repo map system 消息（头部保留区）。"""
-        import mini_agent.kernel.agent as agent
-        import mini_agent.repo_map as repo_map
+        import led_review.kernel.agent as agent
+        import led_review.repo_map as repo_map
         root = make_project(tmp_path, {"core.py": "def api():\n    pass\n"})
         # 让 build_repo_map_cached 指向迷你项目（而非真实仓库）
         monkeypatch.setattr(repo_map, "_IGNORED_ROOT", str(root))

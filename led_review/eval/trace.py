@@ -8,7 +8,7 @@
 import json
 import time
 
-from mini_agent.kernel.events import (
+from led_review.kernel.events import (
     Note,
     ReasoningDelta,
     StreamFinished,

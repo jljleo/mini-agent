@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from mini_agent.hooks import install_hook, uninstall_hook
+from led_review.hooks import install_hook, uninstall_hook
 
 
 @pytest.fixture

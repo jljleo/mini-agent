@@ -356,7 +356,7 @@ fix_dedupe_obf）；模型 k2.7-code、map 组、同批次串行 ×3/每组。
 
 ## 14. 事故留档：包结构重构验证时误触真跑（非实验）
 
-**经过**：2026-09-10 包结构重构（扁平模块 → mini_agent/ 包）收尾验证时，误以
+**经过**：2026-09-10 包结构重构（扁平模块 → led_review/ 包）收尾验证时，误以
 `--help` 探测 run_bench.py（不识别该参数），意外真跑 explain_idempotency 任务
 一次：PASS 1.00、5,448 tokens、82.3s（k3，map 组），第二任务启动时被 SIGPIPE
 中止。结果文件 explain_idempotency-20260910-143324-map.json 即此产物。

@@ -1,6 +1,6 @@
 """CLI 入口：单一主循环，业务逻辑下沉到 agent / input_utils / ui / bridge。
 
-运行：python -m mini_agent（pipx 安装后：mini-agent）
+运行：python -m led_review（pipx 安装后：mini-agent）
 退出：exit / quit / :q / /quit / Ctrl+C / Ctrl+D（运行中单击 Ctrl+C = 优雅打断本轮）
 
 tty 与管道共用 `_chat_loop`，差别全部下沉到 read_input / ui 内部自适应：
@@ -14,14 +14,14 @@ tty 与管道共用 `_chat_loop`，差别全部下沉到 read_input / ui 内部�
 
 import sys
 
-import mini_agent.commands.builtin as commands  # noqa: F401  集中式注册：导入即触发 @command 注册
-import mini_agent.tools.builtin as tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
-import mini_agent.ui.renderer as ui
-from mini_agent.commands.registry import COMMANDS
-from mini_agent.config import CONTEXT_TOKENS, MODEL, PROJECT_ROOT, QUIT_COMMANDS
-from mini_agent.kernel.agent import ChatSession
-from mini_agent.kernel.bridge import run_in_thread
-from mini_agent.ui.input import read_input, set_status_provider
+import led_review.commands.builtin as commands  # noqa: F401  集中式注册：导入即触发 @command 注册
+import led_review.tools.builtin as tools  # noqa: F401  集中式注册：导入即触发 @tool 注册
+import led_review.ui.renderer as ui
+from led_review.commands.registry import COMMANDS
+from led_review.config import CONTEXT_TOKENS, MODEL, PROJECT_ROOT, QUIT_COMMANDS
+from led_review.kernel.agent import ChatSession
+from led_review.kernel.bridge import run_in_thread
+from led_review.ui.input import read_input, set_status_provider
 
 
 def _dispatch_command(session: ChatSession, question: str, forced: bool):
@@ -89,14 +89,28 @@ def _chat_loop(session: ChatSession) -> None:
 
 
 def main() -> None:
+    # 全局帮助：无子命令时 -h/--help 应显示用法而非进 REPL
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print("led —— 可度量检出率的 code review agent（BYOK，用户自配 KIMI_CODE_API_KEY）")
+        print()
+        print("用法：")
+        print("  led                              # 交互 REPL")
+        print("  led review [范围]               # 审查 diff（范围：main...HEAD / commit / 缺省=工作区）")
+        print("      --format json|text           # json 供机器消费")
+        print("      --no-fail                    # 有 high findings 也返回 0")
+        print("      --max-findings N             # 最多输出 N 条 findings")
+        print("  led install-hook                 # 本地自动：push 前自动 review（一次安装）")
+        print("      --pre-commit / --fail-on-high")
+        print("  led uninstall-hook              # 卸载钩子")
+        raise SystemExit(0)
     # 子命令分发：review 是主形态（非交互批处理）；install-hook/uninstall-hook 是
     # 本地自动接入（git 钩子）；无子命令 = 交互 REPL（辅助形态）
     if len(sys.argv) > 1 and sys.argv[1] == "review":
-        from mini_agent import review as review_cmd
+        from led_review import review as review_cmd
 
         raise SystemExit(review_cmd.cli(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] in ("install-hook", "uninstall-hook"):
-        from mini_agent import hooks as hooks_cmd
+        from led_review import hooks as hooks_cmd
 
         raise SystemExit(hooks_cmd.cli(sys.argv[1:]))
 

@@ -14,7 +14,7 @@
 
 import json
 
-from mini_agent.config import (
+from led_review.config import (
     MODEL,
     SINGLE_MSG_CAP_CHARS,
     SLIM_MIN_SAVINGS_CHARS,

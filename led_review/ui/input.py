@@ -25,9 +25,9 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 
-import mini_agent.ui.renderer as ui
-from mini_agent.commands.registry import COMMANDS
-from mini_agent.config import HISTORY_FILE
+import led_review.ui.renderer as ui
+from led_review.commands.registry import COMMANDS
+from led_review.config import HISTORY_FILE
 
 # prompt_toolkit 会话（惰性创建）：历史记录存项目目录，↑ 键可翻出历史提问（跨会话保留）
 # 惰性原因：模块级创建在非 tty 环境（管道输入）会打印警告

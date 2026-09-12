@@ -1,22 +1,22 @@
 # AGENTS.md
 
-> 本文件会被 `mini_agent/kernel/agent.py` 自动注入 system prompt（随会话保留，compact 不截断）：
-> 它是对 AI 协作者的行为契约（编码规范/架构边界/踩坑清单），与 `mini_agent/repo_map.py`
+> 本文件会被 `led_review/kernel/agent.py` 自动注入 system prompt（随会话保留，compact 不截断）：
+> 它是对 AI 协作者的行为契约（编码规范/架构边界/踩坑清单），与 `led_review/repo_map.py`
 > 注入的代码库地图互补——地图回答「仓库有什么」，本文件回答「应该怎么改」。
 > 修改后即刻生效，无需重启。不要把一次性指令/环境特定信息写在这里（放 .env/README）。
 
 ## 项目形态
 
-- 项目主线是 **code review agent**：`mini_agent/review.py` 是 review 管道与子命令（主形态：非交互批处理、CI 可消费、exit code 门禁）；交互 REPL 是辅助形态。diff 提取在 `mini_agent/tools/gitdiff.py`（只读确定性），skills 机制在 `mini_agent/skills.py`（索引常驻注入 + read_file 惰性加载，规范轴载体）。
-- Python 3.13 CLI agent，代码组织为 `mini_agent/` 包（kernel / tools / commands / ui / eval 分层）；有最小 `requirements.txt`（openai / python-dotenv / prompt_toolkit / rich），没有构建步骤、lint 配置或代码生成。使用仓库内虚拟环境：`.venv/bin/python`；新环境先 `.venv/bin/pip install -r requirements.txt`。
-- 代码库感知（mini_agent/repo_map.py）全语言统一走 tree-sitter 解析（lazy import，语言包缺失时该语言静默为空）：python / javascript / typescript(含 tsx) / go / rust / java。加新语言 = 在 repo_map.py 注册 `@_extractor(".xxx")` 提取器 + 装对应 tree-sitter-xxx 包，索引/排序/缓存/检索逻辑语言无关无需改动。
-- 入口是 `mini_agent/main.py`（`.venv/bin/python -m mini_agent`，发布后安装 `pipx install led-review` 得到命令 `led`）：`led review` 子命令走 review.py 管道，无子命令进交互主循环 `_chat_loop`（tty/管道自适应）。曾有的 Textual 全屏 TUI 与 patch_stdout 常驻输入框均已于 2026-09 移除（R0：自研全屏 UI 是负资产；patch_stdout 与 Live 光标重绘互斥必闪烁），不要再引入全屏前端或运行中输入框。
+- 项目主线是 **code review agent**：`led_review/review.py` 是 review 管道与子命令（主形态：非交互批处理、CI 可消费、exit code 门禁）；交互 REPL 是辅助形态。diff 提取在 `led_review/tools/gitdiff.py`（只读确定性），skills 机制在 `led_review/skills.py`（索引常驻注入 + read_file 惰性加载，规范轴载体）。
+- Python 3.13 CLI agent，代码组织为 `led_review/` 包（kernel / tools / commands / ui / eval 分层）；有最小 `requirements.txt`（openai / python-dotenv / prompt_toolkit / rich），没有构建步骤、lint 配置或代码生成。使用仓库内虚拟环境：`.venv/bin/python`；新环境先 `.venv/bin/pip install -r requirements.txt`。
+- 代码库感知（led_review/repo_map.py）全语言统一走 tree-sitter 解析（lazy import，语言包缺失时该语言静默为空）：python / javascript / typescript(含 tsx) / go / rust / java。加新语言 = 在 repo_map.py 注册 `@_extractor(".xxx")` 提取器 + 装对应 tree-sitter-xxx 包，索引/排序/缓存/检索逻辑语言无关无需改动。
+- 入口是 `led_review/main.py`（`.venv/bin/python -m led_review`，发布后安装 `pipx install led-review` 得到命令 `led`）：`led review` 子命令走 review.py 管道，无子命令进交互主循环 `_chat_loop`（tty/管道自适应）。曾有的 Textual 全屏 TUI 与 patch_stdout 常驻输入框均已于 2026-09 移除（R0：自研全屏 UI 是负资产；patch_stdout 与 Live 光标重绘互斥必闪烁），不要再引入全屏前端或运行中输入框。
 - 运行时配置在 `config.py`，会加载 `.env`；真实运行需要对应档案的 API key（默认档案 kimi-code → `KIMI_CODE_API_KEY`，详见 `.env.example`）。不要读取或提交 `.env`。
-- 内核/UI 边界很重要：`mini_agent/kernel/`（agent / streaming / compact）必须保持为事件生产者，不能 import `mini_agent/ui/`。通过产出/消费 `kernel/events.py` 事件来渲染或上报（`ui.renderer.consume`、bench 消费者）。
+- 内核/UI 边界很重要：`led_review/kernel/`（agent / streaming / compact）必须保持为事件生产者，不能 import `led_review/ui/`。通过产出/消费 `kernel/events.py` 事件来渲染或上报（`ui.renderer.consume`、bench 消费者）。
 
 ## 命令
 
-- 运行应用：`.venv/bin/python -m mini_agent`
+- 运行应用：`.venv/bin/python -m led_review`
 - 运行全部测试：`.venv/bin/python -m pytest -q`
 - 运行单个测试文件：`.venv/bin/python -m pytest tests/test_compact.py -q`
 - 运行单个测试：`.venv/bin/python -m pytest tests/test_compact.py::test_name -q`
@@ -32,8 +32,8 @@
 
 ## 仓库特有约定与坑
 
-- 工具只在 `mini_agent/tools/builtin.py` 里用 `@tool` 注册；工具 schema 和实现共用这一个事实来源。常驻工具只由 `tools/registry.py` 的 `RESIDENT_TOOL_NAMES` 控制；新工具默认通过 `search_tools` 可发现，除非显式加入常驻名单。
-- 斜杠命令在 `mini_agent/commands/builtin.py` 里用 `@command` 注册；`main.py` 导入 `tools.builtin` 和 `commands.builtin` 是为了触发注册副作用。
+- 工具只在 `led_review/tools/builtin.py` 里用 `@tool` 注册；工具 schema 和实现共用这一个事实来源。常驻工具只由 `tools/registry.py` 的 `RESIDENT_TOOL_NAMES` 控制；新工具默认通过 `search_tools` 可发现，除非显式加入常驻名单。
+- 斜杠命令在 `led_review/commands/builtin.py` 里用 `@command` 注册；`main.py` 导入 `tools.builtin` 和 `commands.builtin` 是为了触发注册副作用。
 - 上下文压缩只做发送时投影：`kernel/compact.py` 变换的是消息副本，绝不能改存储历史。必须保留 assistant `tool_calls` 与 tool 消息配对；截断不能制造孤儿 tool 消息。
 - 如果流式响应 `finish_reason == "length"` 且带 tool calls，要整批拒绝执行并补上明确的 tool 结果；半截 arguments 不安全，孤儿 tool calls 会导致 API 400。
 - 交互循环刻意没有硬性最大轮次限制。保险丝是 `config.py` 的 `MAX_SAME_TOOL_CALLS`；无人值守场景的轮次限制应放在调用侧（如 bench、子 agent 的 `max_turns`），不要污染核心循环。
@@ -43,7 +43,7 @@
 - 文件工具是窄接口，围栏限制在 `PROJECT_ROOT`；项目外路径需要确认。`run_bash` 由 `permissions.json` 裁决：`deny > allow > ask`；如果命令包含项目外路径，即使命中 allow 也会降级为 ask。不要用 bash 绕过文件围栏访问项目外路径。
 - `edit_file` 是容错策略链（AGENT_DESIGN 13 条）：L1 精确匹配（count>1 拒绝防误改）→ L2 行级宽容定位（忽略行尾空白/换行差异，仍强制唯一）→ L3 失败时报错带 read_file 指引 + 文件头部预览。改后自动做语法冒烟（tree-sitter），坏代码以带行号的 ⚠ 报错附在工具结果里回喂。两个工程纪律：读写必须 `newline=""` 保真（否则 CRLF 仓库换行风格被毁）；`_resolve_safe_path` 必须对 `PROJECT_ROOT` realpath 化（macOS /var→/private/var 符号链接会误判越界）。
 - `$web_search` 在 `config.py` 中被刻意禁用，因为 kimi-k3 当前处理内置工具结果会失败；需要联网时用 `run_bash` + `curl`，并先告诉用户要访问的 URL。
-- UI 输出统一走语义化 helper；tty 与管道都用 `mini_agent/ui/renderer.py`（StreamRenderer：tty 下 Live 增量重排，管道自动降级纯文本直出）。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
+- UI 输出统一走语义化 helper；tty 与管道都用 `led_review/ui/renderer.py`（StreamRenderer：tty 下 Live 增量重排，管道自动降级纯文本直出）。动态/模型文本必须用 `Text`/`markup=False`，避免 `[brackets]` 被当成 Rich markup 解析。
 - `.session.json`、`.chat_history`、`session_todos.json`、`bench/results/` 都是运行时产物，已 gitignore。
 - **评测必留档**：任何真实 API 评测（`bench/run_bench.py` 真跑）完成后必须追加一节到 `bench/EXPERIMENTS.md`（文件头部的强制规范与模板）并随代码提交——负结果也要记；评测抓到内核缺陷（已发生三次：动态注入时序 400、符号链接根误判、@tool 装饰器挂错）是本体系最高价值产出，不许丢在对话里。
 - **评测任务设计准则**（E12 系列豆腐块——新任务/改判分前必须过一遍，每条都有实测事故背书）：

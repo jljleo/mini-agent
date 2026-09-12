@@ -4,10 +4,10 @@ import json
 
 import pytest
 
-import mini_agent.review as review
-from mini_agent.kernel.events import StreamStart, TurnEnd
-from mini_agent.review import cap_findings, parse_findings
-from mini_agent.tools import gitdiff
+import led_review.review as review
+from led_review.kernel.events import StreamStart, TurnEnd
+from led_review.review import cap_findings, parse_findings
+from led_review.tools import gitdiff
 
 SAMPLE_OUTPUT = """- [high] src/auth.py:42 — 空指针：user 可能为 None 时直接访问 user.id
   建议：先判空再取 id
@@ -102,11 +102,11 @@ class TestRoundFuse:
     """两档轮次保险丝：SOFT 档 steering 注入收敛指令，HARD 档才 abort。"""
 
     def _events(self, n):
-        from mini_agent.kernel.events import TextDelta
+        from led_review.kernel.events import TextDelta
         return [x for i in range(n) for x in (StreamStart(), TextDelta(f"r{i}"))]
 
     def test_soft_cap_steers_once(self):
-        from mini_agent.kernel.events import TurnControl
+        from led_review.kernel.events import TurnControl
         control = TurnControl()
         list(review._round_fuse(iter(self._events(review.SOFT_CAP_ROUNDS + 1)), control))
         assert control.steer.qsize() == 1
@@ -114,7 +114,7 @@ class TestRoundFuse:
         assert not control.interrupt.is_set()  # SOFT 档不打断
 
     def test_hard_cap_aborts(self):
-        from mini_agent.kernel.events import TurnControl
+        from led_review.kernel.events import TurnControl
         control = TurnControl()
         out = list(review._round_fuse(iter(self._events(review.HARD_CAP_ROUNDS + 5)), control))
         assert control.interrupt.is_set()

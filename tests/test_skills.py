@@ -1,8 +1,8 @@
 """skills 机制回归测试：frontmatter 解析容错 / 扫描 / 索引格式 / ChatSession 注入。"""
 
-import mini_agent.config as config
-import mini_agent.kernel.agent as agent
-from mini_agent.skills import _parse_frontmatter, format_skills_index, scan_skills
+import led_review.config as config
+import led_review.kernel.agent as agent
+from led_review.skills import _parse_frontmatter, format_skills_index, scan_skills
 
 STANDARD = """---
 name: commit-style

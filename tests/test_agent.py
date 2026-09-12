@@ -7,9 +7,9 @@ chat() 主循环是事件流生成器：API 调用用 monkeypatch 打桩（strea
 import json
 import os
 
-import mini_agent.kernel.agent as agent
-from mini_agent.kernel.agent import load_saved_session
-from mini_agent.kernel.events import Note, StreamFinished, TextDelta, TurnControl, TurnEnd, Warn
+import led_review.kernel.agent as agent
+from led_review.kernel.agent import load_saved_session
+from led_review.kernel.events import Note, StreamFinished, TextDelta, TurnControl, TurnEnd, Warn
 
 
 class TestMarkRollback:
@@ -355,7 +355,7 @@ class TestAgentsMdInjection:
     """AGENTS.md 行为契约注入：全实例（含子 agent）随会话保留，失败静默。"""
 
     def test_injected_as_system_message(self, tmp_path, monkeypatch):
-        import mini_agent.config as config
+        import led_review.config as config
         (tmp_path / "AGENTS.md").write_text(
             "内核模块 agent.py/streaming.py/compact.py 严禁 import ui。",
             encoding="utf-8",
@@ -369,7 +369,7 @@ class TestAgentsMdInjection:
         assert any("AGENTS.md 仓库行为约定" in t for t in texts)
 
     def test_missing_file_skipped(self, tmp_path, monkeypatch):
-        import mini_agent.config as config
+        import led_review.config as config
         monkeypatch.setattr(config, "PROJECT_ROOT", str(tmp_path))  # 无 AGENTS.md
         session = agent.ChatSession(set_provider=False)
         texts = [m.get("content", "") for m in session.messages
@@ -377,12 +377,12 @@ class TestAgentsMdInjection:
         assert not any("AGENTS.md" in t for t in texts), "文件缺失应静默跳过"
 
     def test_helper_returns_none_without_file(self, tmp_path, monkeypatch):
-        import mini_agent.config as config
+        import led_review.config as config
         monkeypatch.setattr(config, "PROJECT_ROOT", str(tmp_path))
         assert agent._agents_md_text() is None
 
     def test_helper_reads_real_file(self, monkeypatch):
-        import mini_agent.config as config
+        import led_review.config as config
         real_root = config.PROJECT_ROOT  # 版本库根，AGENTS.md 在仓库内
         monkeypatch.setattr(config, "PROJECT_ROOT", real_root)
         text = agent._agents_md_text()

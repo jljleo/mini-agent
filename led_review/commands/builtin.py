@@ -9,17 +9,17 @@ import os
 
 from rich.table import Table
 
-import mini_agent.ui.renderer as ui
-from mini_agent.commands.registry import command
-from mini_agent.config import (
+import led_review.ui.renderer as ui
+from led_review.commands.registry import command
+from led_review.config import (
     SESSION_FILE,
     SYSTEM_MESSAGES,
     format_context_tokens,
     get_profile,
     list_profiles,
 )
-from mini_agent.kernel.agent import ChatSession, load_saved_session
-from mini_agent.kernel.compact import (
+from led_review.kernel.agent import ChatSession, load_saved_session
+from led_review.kernel.compact import (
     apply_message_cap,
     apply_slimming,
     apply_truncation,
@@ -29,7 +29,7 @@ from mini_agent.kernel.compact import (
     extract_middle,
     summarize_middle,
 )
-from mini_agent.tools.builtin import clear_todo_file
+from led_review.tools.builtin import clear_todo_file
 
 
 def _render_rows(rows: list[tuple[str, str]]) -> None:

@@ -10,7 +10,7 @@ import re
 
 from openai import OpenAI
 
-from mini_agent.config import API_KEY_ENV, BASE_URL, MODEL
+from led_review.config import API_KEY_ENV, BASE_URL, MODEL
 
 _JUDGE_SYSTEM = (
     "你是一名客观的评测判分员。根据给定的评分标准（rubric），评估任务产出是否达标，"
