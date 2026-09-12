@@ -137,6 +137,7 @@ class ChatSession:
         #     （prompt + completion），用于状态栏 ctx %；无响应时回退到估算
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+        self.total_cached_tokens = 0
         self.last_prompt_tokens = 0
         self.current_context_tokens = 0
         # 子 agent 支持：可注入的工具集与嵌套深度
@@ -364,6 +365,7 @@ class ChatSession:
                 self.last_prompt_tokens = usage.prompt_tokens
                 self.current_context_tokens = usage.prompt_tokens + usage.completion_tokens
                 cached = getattr(usage, "cached_tokens", 0) or 0
+                self.total_cached_tokens += cached
                 yield Usage(usage.prompt_tokens, usage.completion_tokens, cached,
                             self.total_prompt_tokens + self.total_completion_tokens)
 

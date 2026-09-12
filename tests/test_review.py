@@ -220,3 +220,27 @@ class TestPipeOutput:
         monkeypatch.setattr(review.gitdiff, "collect", lambda spec, root=None: "（无变更）")
         assert review.review(None, fmt="text") == 0
         assert "跳过" in capsys.readouterr().out
+
+
+class TestApiFailureDiagnostic:
+    """配额/API 故障的诊断输出与退出码（dogfood 实拍：403 被 --no-fail 静默吞成空评论）。"""
+
+    def test_openai_error_prints_diagnostic_and_exit2(self, monkeypatch, capsys):
+        from openai import OpenAIError
+
+        def boom(*a, **k):
+            raise OpenAIError("403 quota exceeded")
+
+        monkeypatch.setattr(review, "run_review", boom)
+        assert review.cli(["HEAD", "--no-fail"]) == 2
+        out = capsys.readouterr().out
+        assert "⚠ led 无法完成 review" in out    # 诊断进 stdout（评论可见）
+        assert "403" in out
+
+    def test_non_openai_error_still_raises(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("真 bug")
+
+        monkeypatch.setattr(review, "run_review", boom)
+        with pytest.raises(RuntimeError):
+            review.cli(["HEAD"])

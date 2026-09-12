@@ -738,3 +738,105 @@ CLI 适配解包。320 测试全绿。**注意**：恢复的实现是重新写�
 - 副产品（2）：E12 的 neutral 修复（mapstructure 测试回退区）在 n=3 下再未出现
   相关 FP——修复稳定。
 - 可复现：上表命令 ×3；样本文件 bench/results/*20260911-{16,17}*.json。
+
+---
+
+### 【E13】2026-09-12 旋钮调优①：压缩水位（触发线）
+
+- 动机：ROADMAP「旋钮调优」未勾项第一发。假设 a) 1M 窗口下按比例调压缩水位对
+  ≤120K 评测任务无杠杆（任务远小于窗口，压缩永不触发）；b) 若强行收紧（绝对触发线），
+  压缩对检出率的代价是什么。
+- 控制变量：模型 k3（kimi-code）、group=map、review-mode=single；只操纵
+  truncate_high_tokens 触发线（--knob=compress:<档>）；判分 = score/检出/成本。
+  基线引用 E12.9 已记录结果（不重跑，省成本）。
+- 设施：--knob 旋钮基建（B1/B2 同 commit 引入；cached_tokens 首次进结果文件）。
+  txn_dedupe_flush（合成深 bug，原生 ~9K tokens）+ oss_packaging_ranges（OSS，
+  原生 96-117K，成本异常点、唯一真实触发面）。
+- 数据：
+
+| 运行 | 触发线 | score | tokens | 秒 | 行为路径 |
+|---|---|---|---|---|---|
+| txn@60k | 60K | 1.00 | 9,393 | 65 | 不触发（任务 < 60K），=baseline |
+| packaging@60k #1 | 60K | **0.00** | 24,464 | 12 | 熔断：read_file×3 → MAX_SAME_TOOL_CALLS |
+| packaging@60k #2 | 60K | **0.00（复现）** | 25,162 | 26 | 同上，确定性熔断 |
+| packaging@120k | 120K | 1.00 | 97,288 | 232 | 与 E12.9 baseline（96-117K）无差异 |
+| packaging baseline | CTX-28K≈1.0M | 1.00 | 96-117K | — | E12.9 n=3 全检出（历史） |
+
+- 结论：
+  1. **假设 a 证实**：kimi-code 档案 CONTEXT_TOKENS = 1,028,576（~1M 窗口），
+     基线触发线 ≈ 1.0M 对评测任务永不触发；按窗口比例调档（如 45K/12K 提前/延后）
+     同样无杠杆。要做压缩实验必须给绝对触发线（60K/120K 语义）。
+  2. **60K 必触发线 = 确定性击穿（2/2）**：score 1.0 → 0.0，行为崩坏为
+     「read_file 连续重复 3 次 → 保险丝熔断 → 空终稿」；tokens 反降（24-25K vs
+     97K）但那是任务没跑完，不是省了钱。120K 则与 baseline 完全一致（97K/232s）。
+  3. **因果推测（未单独验证）**：review 短会话消息少，中段工具结果被 L1 触发线
+     切掉后上下文不连续 → 模型困惑 → 重复读同一文件 → 熔断。即「L1 截断对
+     review 行为有决定性破坏」，比长对话场景更脆（长对话有更多冗余可丢）。
+  4. 操作含义：a) 压缩水位对 review 管道的实际可调空间在「接近任务体量」的
+     KO 区间，不存在温柔曲线；b) 熔断阈值 3 在压缩扰动下是行为脆点——候选旋钮
+     「MAX_SAME_TOOL_CALLS 容忍度」与「L1 保留区扩充中段 tool 结果」挂进后续
+     实验。
+- 副产品：无内核缺陷（保险丝按设计工作；问题在触发线的任务适配，不在代码）。
+- 可复现：`bench/run_bench.py review_oss_packaging_ranges --knob=compress:60k`
+  （×2 复现熔断）；`--knob=compress:120k`（对照）；样本在 results/*-*60k*/120k*.json
+
+---
+
+### 【E14】2026-09-12 旋钮调优②：repo map 预算（REPO_MAP_MAX_CHARS）
+
+- 动机：预算 3000 是否检出约束？1500/6000 是否省钱或掉检出？→「预算旋钮有没有杠杆」。
+- 控制变量：模型 k3、group=map、single；只操纵 REPO_MAP_MAX_CHARS（--knob=repomap:<int>）；
+  3000=基线（E12.9 历史/E13 盘）。
+- 设施：txn_dedupe_flush（合成）、oss_mapstructure（OSS 小）、oss_packaging（OSS 大仓库）3 探针。
+- 数据：
+
+| 探针 | 1500 | 3000（基线） | 6000 |
+|---|---|---|---|
+| txn_dedupe_flush | 1.0 / 9.4K | 1.0 / 9.4K（E13） | 1.0 / **5.3K** |
+| oss_mapstructure | 1.0 / 21K | 1.0 / 9-14K（E12.9） | 1.0 / 34K |
+| oss_packaging | 1.0 / 95K | 1.0 / 96-117K（E12.9） | 未跑（省成本） |
+
+- 结论：
+  1. **预算 1500-6000 区间对检出率零影响（6/6 全检出）**。成本变化方向不一：
+     txn@6000 反而省（5.3K vs 9.4K）、mapstructure@6000 更贵（34K vs 9-14K）、
+     packaging 无感（95K ≈ 基线）——没有单调、没有可套利档。
+  2. 解释：合成/OSS 级仓库的 map 总量大多 < 1500 字符（塞不满预算），cut 从未
+     发生或只削尾部低价值符号——预算不是当前约束面。
+  3. **可操作推论**：a) 保守下调 REPO_MAP_MAX_CHARS 到 1500 无检出代价（省
+     prompt 空间）；b) 大仓库方向的真缺口是**语义召回**（diff 相关文件的定向
+     注入），不是预算——预算旋钮在本任务库无杠杆，别再为它花评测预算。
+- 副产品：无。
+- 可复现：`bench/run_bench.py <task> --knob=repomap:<1500|6000> --group=map`。
+
+---
+
+### 【E15】2026-09-12 旋钮调优③：prompt 变体（strong 输出规格）——配额中断，未完
+
+- 动机：E12.8 教训的正面回应——输出规格强制化（实现位置纪律 + 复现思路 +
+  confidence 自评）能否拉高「可接受定位率」、是否损检出。**本轮核心问题**
+  （定位精度差异）因 API 配额中断未验证，条目就事记录。
+- 控制变量：模型 k3、group=map、single；只操纵 prompt（--knob=prompt:strong，
+  review.build_prompt(strong=True)，独立模板 _REVIEW_HEADER_STRONG，基线零回归）；
+  判分同 E12.5/12.8（txn/quota 的检出与定位）。
+- 设施：4 探针 = txn（合成深 bug）+ quota（合成，E12.8 定位欠账源）+
+  mapstructure（OSS）+ session_ttl（跨文件）。
+- 数据：
+
+| 探针 | strong | baseline（历史） |
+|---|---|---|
+| txn_dedupe_flush | 1.0 / 9.8K / 26s | 1.0 / 9-14K |
+| window_quota_slide | 1.0 / 8.4K / 23s | 1.0 / 8-10K |
+| oss_mapstructure | **未完成**（403 ×2） | 1.0 / 9-14K（E12.9） |
+| session_ttl | **未完成**（403 ×1） | 1.0（E12.7 跨文件） |
+
+- 结论（部分）：
+  1. **strong 不损检出（2/2 合成探针）**；token 与 baseline 同级。
+  2. 定位精度差异（本实验主问题）未验证——两探针被配额故障截断，等配额恢复
+     或换档案补跑后再定论。
+- 副产品（1）：**kimi-code 月配额耗尽（403 access_terminated）**——本日评测
+  ~340K tokens（E13 156K + E14 165K + E15 18K）触发限制。0 tokens 故障样本的
+  原因分类要新增「配额 403」（与基础设施抖动同为非模型行为；两者都需排除/补跑）。
+- 副产品（2）：0 tokens ×3 连续出现时先查 API 配额再怀疑代码——本次差点误判
+  为 strong 旋钮缺陷（bench 已把异常降级为 0 tokens FAIL，无配额区分字段；
+  改进候选：bench 结果加 error 字段记录异常原因）。
+- 可复现：`bench/run_bench.py <task> --knob=prompt:strong`（配额恢复后）。
