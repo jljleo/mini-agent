@@ -294,6 +294,18 @@ def cli(argv: list[str]) -> int:
     except gitdiff.GitRepoError as e:
         print(f"✗ {e}", file=sys.stderr)
         return 2
+    except Exception as e:
+        # API/基础设施故障（配额 403、网络、超时）：dogfood 实拍——`--no-fail || true`
+        # 会静默吞掉任何非零退出，空 stdout 的 bot 评论让用户误以为是“无 findings”。
+        # 把可读诊断打到 stdout（进 PR 评论/管道），退出码 2 与门禁语义(1)区分。
+        # 仅限 openai 类错误：真代码 bug 不该被包装成“网络问题”，继续上抛。
+        import openai
+        if not isinstance(e, openai.OpenAIError):
+            raise
+        import led_review.config as config
+        print(f"⚠ led 无法完成 review：{type(e).__name__}（模型 {config.MODEL}）")
+        print(f"  可能原因：API 配额耗尽 / 网络 / 端点异常。错误：{str(e)[:300]}")
+        return 2
 
 
 def cap_findings(findings: list[Finding], limit: int) -> list[Finding]:
