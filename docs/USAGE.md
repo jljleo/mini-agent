@@ -2,7 +2,7 @@
 
 > 面向使用者（不只是读者）。覆盖安装、配置、两种使用形态（review 批处理 / 交互
 > REPL）、权限与安全模型、评测体系、开发流程与故障排查。
-> 本文档以 2026-09 代码状态为准（330 测试通过）。
+> 本文档以 2026-09 代码状态为准（338 测试通过）。
 
 ---
 
@@ -339,7 +339,7 @@ EXPERIMENTS.md E11~E12.9（k3 全检出、OSS n=3 零误报、precision 防线 1
 ## 9. 开发与调试
 
 ```bash
-.venv/bin/python -m pytest -q          # 全部测试（330）
+.venv/bin/python -m pytest -q          # 全部测试（338）
 .venv/bin/python -m pytest tests/test_compact.py -q
 .venv/bin/python -m pytest tests/test_compact.py::test_name -q
 .venv/bin/ruff check .                 # lint
@@ -374,7 +374,8 @@ MINI_AGENT_MODEL=kimi-code-256k .venv/bin/python -m led_review review HEAD  # �
 
 ```
 led_review/
-├── main.py        入口：review 子命令分发 / 无子命令进交互主循环
+├── main.py        入口：review / install-hook / uninstall-hook 子命令分发，
+│                  无子命令进交互主循环（led --help 显示完整用法）
 ├── kernel/        agent 循环、流式、上下文压缩（事件生产者，不 import ui）
 │   └── events.py  TurnControl / StreamStart / TextDelta / Warn 等事件
 ├── tools/         @tool 注册（builtin.py）、registry（常驻名单）、gitdiff 只读抽取
@@ -384,6 +385,7 @@ led_review/
 ├── repo_map.py    tree-sitter 全语言代码库地图
 ├── skills.py      skills 索引
 ├── config.py      运行时配置（模型档案、权限常量、SUBAGENT_TYPES…）
+├── hooks.py       install-hook / uninstall-hook（本地 git 钩子自动接入）
 └── review.py      review 管道（双轴/parallel、保险丝、门禁、--max-findings）
 ```
 
@@ -515,6 +517,7 @@ led uninstall-hook               # 卸载（默认全部；--pre-commit/--pre-pu
 ```bash
 # 1. 安装（一次）
 pipx install led-review
+#    装好后随时 led --help 查看完整用法
 
 # 2. 配 key（一次，BYOK）
 #    去 https://www.kimi.com/code/console 申请 KIMI_CODE_API_KEY
