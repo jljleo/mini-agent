@@ -79,9 +79,19 @@ class TestReviewExitCode:
         assert "跳过" in capsys.readouterr().out
 
     def test_text_mode_renders_and_prints_gate(self, fake_review_env, monkeypatch, capsys):
+        """tty 分支：render=True（工具流渲染）且输出门禁行。
+
+        led review 在 PR #4 指正：capsys 下 isatty() 恒 False，此测试原先静默
+        走管道分支（render=False），tty 分支零覆盖、ui.consume 桩永不触发——
+        显式钉住 isatty=True 让测试名副其实。
+        """
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)  # 真 tty 分支
         fake_review_env(SAMPLE_OUTPUT)
-        monkeypatch.setattr(review.ui, "consume", lambda events: list(events))
+        calls = []
+        monkeypatch.setattr(review.ui, "consume",
+                            lambda events: calls.append(1) or list(events))
         assert review.review("HEAD", fmt="text") == 1
+        assert calls == [1]                        # consume 被调用（渲染过）
         assert "1 个 high findings" in capsys.readouterr().out
 
 
