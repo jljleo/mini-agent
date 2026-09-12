@@ -212,7 +212,12 @@ def run_review(spec: str | None = None, *, root: str | None = None,
 def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = True,
            max_findings: int = 0, root: str | None = None) -> int:
     """CLI 壳：跑一轮 review，返回 exit code（默认 high findings → 1，CI 门禁语义）。"""
-    raw, findings, sessions = run_review(spec, root=root, render=(fmt == "text"))
+    # 完整终端渲染（工具流/流式正文/thinking 计数）只在 tty 有意义；管道/CI 场景
+    # 必须输出干净可解析的终稿（renderer 的「非 tty 纯文本直出」承诺）——否则
+    # `led review > review.md` 会把整套 ⏺/⎿ 工具调用跟踪卷进 PR 评论（dogfood
+    # 实拍：乱码重复、工具过程泄露进最终报告）。
+    tty = fmt == "text" and sys.stdout.isatty()
+    raw, findings, sessions = run_review(spec, root=root, render=tty)
     findings = cap_findings(findings, max_findings)
     if not sessions:
         print("无变更，跳过 review")
@@ -228,7 +233,13 @@ def review(spec: str | None = None, *, fmt: str = "text", fail_on_high: bool = T
         }, ensure_ascii=False, indent=2))
     else:
         gate = f"✗ {high} 个 high findings" if high else "✓ 无 high findings"
-        print(f"\n{gate}（共 {len(findings)} 条）")
+        if tty:
+            print(f"\n{gate}（共 {len(findings)} 条）")
+        else:
+            # 非 tty：只输出终稿原文 + 门禁行——机器/CI/PR 评论要的是正文，
+            # 不是终端渲染过程
+            print(raw)
+            print(f"{gate}（共 {len(findings)} 条）")
 
     return 1 if (fail_on_high and high) else 0
 

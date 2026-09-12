@@ -1,6 +1,7 @@
 """review pipeline 回归测试：findings 解析 / exit code 门禁 / 输出模式隔离（打桩会话，零网络）。"""
 
 import json
+import sys
 
 import pytest
 
@@ -78,9 +79,19 @@ class TestReviewExitCode:
         assert "跳过" in capsys.readouterr().out
 
     def test_text_mode_renders_and_prints_gate(self, fake_review_env, monkeypatch, capsys):
+        """tty 分支：render=True（工具流渲染）且输出门禁行。
+
+        led review 在 PR #4 指正：capsys 下 isatty() 恒 False，此测试原先静默
+        走管道分支（render=False），tty 分支零覆盖、ui.consume 桩永不触发——
+        显式钉住 isatty=True 让测试名副其实。
+        """
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)  # 真 tty 分支
         fake_review_env(SAMPLE_OUTPUT)
-        monkeypatch.setattr(review.ui, "consume", lambda events: list(events))
+        calls = []
+        monkeypatch.setattr(review.ui, "consume",
+                            lambda events: calls.append(1) or list(events))
         assert review.review("HEAD", fmt="text") == 1
+        assert calls == [1]                        # consume 被调用（渲染过）
         assert "1 个 high findings" in capsys.readouterr().out
 
 
@@ -180,3 +191,32 @@ class TestCapFindings:
 
     def test_limit_one(self):
         assert len(cap_findings(self._f(2), 1)) == 1
+
+
+class TestPipeOutput:
+    """非 tty（管道/CI）的 text 模式输出必须干净可解析（dogfood 真 bug 回归）。
+
+    上游 bug：text 模式一律 render=True → `led review > review.md` 把整套
+    ⏺/⎿ 工具调用终端渲染卷进 PR 评论（评论乱码/工具过程泄露）。修复后
+    管道模式只出终稿原文 + 门禁行。
+    """
+
+    def test_pipe_mode_prints_raw_not_render(self, fake_review_env, monkeypatch, capsys):
+        """非 tty：不调 ui.consume（无工具流渲染），输出含终稿原文与门禁行。"""
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: False)  # 模拟管道
+        fake_review_env(SAMPLE_OUTPUT)
+        calls = []
+        monkeypatch.setattr(review.ui, "consume",
+                            lambda events: calls.append(1) or list(events))
+        code = review.review("HEAD", fmt="text")
+        out = capsys.readouterr().out
+        assert calls == []                    # 未渲染（无工具流）
+        assert "空指针" in out                # 终稿原文在
+        assert "1 个 high findings" in out    # 门禁行在
+        assert "⏺" not in out and "⎿" not in out  # 无渲染标记
+        assert code == 1
+
+    def test_no_change_pipe_skips(self, monkeypatch, capsys):
+        monkeypatch.setattr(review.gitdiff, "collect", lambda spec, root=None: "（无变更）")
+        assert review.review(None, fmt="text") == 0
+        assert "跳过" in capsys.readouterr().out
